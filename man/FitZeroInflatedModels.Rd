@@ -32,6 +32,7 @@ A data frame with one row per gene containing:
     \item pi: Estimated zero-inflation probability
     \item converged: Logical indicating if the model converged
     \item n_nonzero: Number of non-zero observations for the gene
+    \item n_datapoints: Total number of data points (cells) for the gene
   }
 }
 \description{

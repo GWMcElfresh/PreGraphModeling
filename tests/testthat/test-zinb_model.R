@@ -23,7 +23,7 @@ test_that("FitZeroInflatedModels works with simple data", {
   # Verify structure
   expect_s3_class(result, "data.frame")
   expect_equal(nrow(result), n_genes)
-  expect_named(result, c("gene", "mu", "phi", "pi", "converged", "n_nonzero"))
+  expect_named(result, c("gene", "mu", "phi", "pi", "converged", "n_nonzero", "n_datapoints"))
   
   # Verify all genes are present
   expect_equal(result$gene, rownames(expr_matrix))
@@ -33,6 +33,9 @@ test_that("FitZeroInflatedModels works with simple data", {
   expect_type(result$phi, "double")
   expect_type(result$pi, "double")
   expect_type(result$converged, "logical")
+  
+  # Verify n_datapoints
+  expect_equal(unique(result$n_datapoints), n_samples)
 })
 
 test_that("FitZeroInflatedModels handles gene subset correctly", {

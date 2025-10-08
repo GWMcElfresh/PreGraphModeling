@@ -20,6 +20,7 @@
 #'     \item pi: Estimated zero-inflation probability
 #'     \item converged: Logical indicating if the model converged
 #'     \item n_nonzero: Number of non-zero observations for the gene
+#'     \item n_datapoints: Total number of data points (cells) for the gene
 #'   }
 #'
 #' @export
@@ -86,6 +87,7 @@ FitZeroInflatedModels <- function(expressionMatrix,
     pi = numeric(length(genes_to_fit)),
     converged = logical(length(genes_to_fit)),
     n_nonzero = integer(length(genes_to_fit)),
+    n_datapoints = integer(length(genes_to_fit)),
     stringsAsFactors = FALSE
   )
   
@@ -100,10 +102,12 @@ FitZeroInflatedModels <- function(expressionMatrix,
     # Extract gene expression
     gene_expr <- as.numeric(expressionMatrix[gene_name, ])
     n_nonzero <- sum(gene_expr > 0)
+    n_datapoints <- length(gene_expr)
     
-    # Store gene name and n_nonzero
+    # Store gene name, n_nonzero, and n_datapoints
     results$gene[i] <- gene_name
     results$n_nonzero[i] <- n_nonzero
+    results$n_datapoints[i] <- n_datapoints
     
     # Skip if not enough non-zero values
     if (n_nonzero < minNonZero) {

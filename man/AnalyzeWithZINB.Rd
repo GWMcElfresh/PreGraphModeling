@@ -11,6 +11,8 @@ AnalyzeWithZINB(
   slot = "counts",
   geneSubset = NULL,
   minNonZero = 3,
+  parallel = FALSE,
+  numWorkers = NULL,
   verbose = TRUE
 )
 }
@@ -30,32 +32,43 @@ If NULL, models are fit for all genes (default: NULL).}
 \item{minNonZero}{Minimum number of non-zero observations required to fit a model
 (default: 3).}
 
+\item{parallel}{Logical indicating whether to use parallel processing (default: FALSE).}
+
+\item{numWorkers}{Integer specifying number of workers for parallel processing.
+If NULL, uses detectCores()-1 (default: NULL).}
+
 \item{verbose}{Logical indicating whether to print progress messages (default: TRUE).}
 }
 \value{
-A list with three elements:
+A list with four elements:
   \itemize{
     \item subset_matrices: List of expression matrices, one per subset
     \item group_metadata: Metadata for each subset
     \item model_parameters: List of data frames with estimated ZINB parameters for each subset
+    \item combined_parameters: Single data frame with all parameters merged, including key and key_colnames
+    \item timing: Data frame with elapsed time for each step
   }
 }
 \description{
 This convenience function combines subsetting and zero-inflated negative
 binomial model fitting into a single step. It subsets a Seurat object
 according to specified metadata columns and then fits ZINB models to each
-subset to estimate distribution parameters.
+subset to estimate distribution parameters. Supports parallel processing.
 }
 \examples{
 \dontrun{
 # Complete analysis with single metadata column
 result <- AnalyzeWithZINB(seurat_obj, groupByColumns = "CellType")
 
-# Complete analysis with multiple metadata columns
+# Complete analysis with multiple metadata columns and parallel processing
 result <- AnalyzeWithZINB(seurat_obj, 
-                         groupByColumns = c("CellType", "Sample"))
+                         groupByColumns = c("CellType", "Sample"),
+                         parallel = TRUE)
 
 # Access results for first subset
 head(result$model_parameters[[1]])
+
+# Access combined parameters with keys
+head(result$combined_parameters)
 }
 }

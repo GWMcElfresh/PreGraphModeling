@@ -20,6 +20,21 @@ devtools::install_github("GWMcElfresh/PreGraphModeling")
   - Estimates mean (mu), dispersion (phi), and zero-inflation probability (pi)
   - Fits separate models to each subset
   - Handles sparse single-cell count data effectively
+  - Returns total datapoints (n_datapoints) for each gene
+
+- **Key-based Results**: Easy joining and merging
+  - Delimited keys (e.g., "CellType1|Treatment1") for each subset
+  - `key_colnames` field indicates the join order
+  - Combined data frame with all results merged
+
+- **Parallel Processing**: Speed up analysis on large datasets
+  - Auto-detects optimal plan (multicore on Linux, multisession on Windows)
+  - Configurable number of workers
+  - Uses `future` and `future.apply` packages
+
+- **Timing Information**: Track performance
+  - Reports elapsed time for each step (subsetting, model fitting, merging)
+  - Helps identify bottlenecks in analysis pipeline
 
 ## Usage
 
@@ -87,12 +102,50 @@ result <- AnalyzeWithZINB(
 subset_matrices <- result$subset_matrices  # List of expression matrices
 group_metadata <- result$group_metadata    # Data frame with subset info
 model_params <- result$model_parameters    # List of parameter data frames
+combined_params <- result$combined_parameters  # Single merged data frame with keys
+timing <- result$timing  # Timing information for each step
 
 # View parameters for first subset
 head(result$model_parameters[[1]])
 
 # View parameters for a specific subset by name
 head(result$model_parameters[["TypeA_Control"]])
+
+# View combined parameters with keys
+head(result$combined_parameters)
+#   gene    mu   phi   pi converged n_nonzero n_datapoints            key    key_colnames
+# 1 Gene1 12.5  2.34 0.15      TRUE        18           20 TypeA_Control CellType|Treatment
+# 2 Gene2  8.9  1.87 0.22      TRUE        16           20 TypeA_Control CellType|Treatment
+
+# Check timing information
+print(result$timing)
+#            step elapsed_seconds
+# 1    Subsetting            0.15
+# 2 Model Fitting            2.35
+# 3  Data Merging            0.08
+```
+
+### Parallel Processing
+
+For large datasets, enable parallel processing to speed up model fitting:
+
+```r
+# Use parallel processing with auto-detected number of cores
+result <- AnalyzeWithZINB(
+  seuratObject = seurat_obj,
+  groupByColumns = c("CellType", "Treatment"),
+  parallel = TRUE,
+  verbose = TRUE
+)
+
+# Specify number of workers manually
+result <- AnalyzeWithZINB(
+  seuratObject = seurat_obj,
+  groupByColumns = c("CellType", "Treatment"),
+  parallel = TRUE,
+  numWorkers = 4,
+  verbose = TRUE
+)
 ```
 
 ### Subset Analysis with Gene Selection
@@ -142,22 +195,34 @@ The ZINB model estimates three key parameters for each gene in each subset:
 # Example: Compare T cells vs B cells under different treatments
 library(PreGraphModeling)
 
-# Create subsets for each CellType + Treatment combination
+# Create subsets for each CellType + Treatment combination with parallel processing
 result <- AnalyzeWithZINB(
   seuratObject = pbmc,
   groupByColumns = c("CellType", "Treatment"),
   geneSubset = c("CD3D", "CD4", "CD8A", "MS4A1"),
-  minNonZero = 5
+  minNonZero = 5,
+  parallel = TRUE
 )
 
-# Compare CD3D expression parameters across subsets
-cd3d_params <- lapply(result$model_parameters, function(df) {
-  df[df$gene == "CD3D", ]
-})
+# Use the combined_parameters data frame with keys for easy filtering
+cd3d_data <- result$combined_parameters[result$combined_parameters$gene == "CD3D", ]
+print(cd3d_data)
+#   gene   mu  phi   pi converged n_nonzero n_datapoints               key       key_colnames
+# 1 CD3D 15.2 3.1 0.12      TRUE        45           50  Tcell_Control CellType|Treatment
+# 2 CD3D 18.7 3.4 0.10      TRUE        48           50 Tcell_Treatment CellType|Treatment
+# 3 CD3D  2.1 1.2 0.45      TRUE        15           50  Bcell_Control CellType|Treatment
+# 4 CD3D  2.3 1.3 0.43      TRUE        17           50 Bcell_Treatment CellType|Treatment
 
-# Combine into one data frame for easy comparison
-cd3d_comparison <- do.call(rbind, cd3d_params)
-print(cd3d_comparison)
+# Join with external data using the key
+# The key_colnames field tells you the order: "CellType|Treatment"
+external_data <- data.frame(
+  key = c("Tcell_Control", "Tcell_Treatment", "Bcell_Control", "Bcell_Treatment"),
+  condition_label = c("T-Ctrl", "T-Trt", "B-Ctrl", "B-Trt"),
+  expected_expression = c("High", "High", "Low", "Low")
+)
+
+merged_results <- merge(cd3d_data, external_data, by = "key")
+print(merged_results)
 ```
 
 ## Testing
@@ -174,11 +239,21 @@ devtools::check()
 
 ## Requirements
 
+### Required
 - R >= 4.0.0
 - SeuratObject
 - pscl
 - Matrix
 - methods
+- parallel
+
+### Optional (for parallel processing)
+- future
+- future.apply
+
+### Optional (for advanced data handling)
+- HDF5Array
+- DelayedArray
 
 ## License
 

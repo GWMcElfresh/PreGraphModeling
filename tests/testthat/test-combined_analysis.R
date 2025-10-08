@@ -35,7 +35,8 @@ test_that("AnalyzeWithZINB integrates subsetting and modeling", {
   
   # Verify structure
   expect_type(result, "list")
-  expect_named(result, c("subset_matrices", "group_metadata", "model_parameters"))
+  expect_named(result, c("subset_matrices", "group_metadata", "model_parameters", 
+                        "combined_parameters", "timing"))
   
   # Verify subset results
   expect_type(result$subset_matrices, "list")
@@ -53,9 +54,19 @@ test_that("AnalyzeWithZINB integrates subsetting and modeling", {
   for (params in result$model_parameters) {
     expect_s3_class(params, "data.frame")
     expect_equal(nrow(params), n_genes)
-    expect_true(all(c("gene", "mu", "phi", "pi", "converged", "subset") %in% 
+    expect_true(all(c("gene", "mu", "phi", "pi", "converged", "subset", "n_datapoints") %in% 
                      colnames(params)))
   }
+  
+  # Verify combined parameters
+  expect_s3_class(result$combined_parameters, "data.frame")
+  expect_true(all(c("gene", "mu", "phi", "pi", "key", "key_colnames", "n_datapoints") %in% 
+                   colnames(result$combined_parameters)))
+  expect_equal(unique(result$combined_parameters$key_colnames), "CellType")
+  
+  # Verify timing data
+  expect_s3_class(result$timing, "data.frame")
+  expect_true(all(c("step", "elapsed_seconds") %in% colnames(result$timing)))
 })
 
 test_that("AnalyzeWithZINB works with multiple grouping columns", {
@@ -196,4 +207,105 @@ test_that("AnalyzeWithZINB propagates parameters correctly", {
     }
   }
   expect_true(has_na)
+})
+
+test_that("AnalyzeWithZINB creates proper keys and key_colnames", {
+  skip_if_not_installed("SeuratObject")
+  skip_if_not_installed("pscl")
+  
+  set.seed(555)
+  n_cells <- 40
+  n_genes <- 10
+  
+  # Create expression matrix
+  expr_matrix <- matrix(
+    rpois(n_genes * n_cells, lambda = 6),
+    nrow = n_genes,
+    ncol = n_cells,
+    dimnames = list(paste0("Gene", 1:n_genes), paste0("Cell", 1:n_cells))
+  )
+  
+  # Create metadata with multiple columns
+  metadata <- data.frame(
+    CellType = rep(c("TypeA", "TypeB"), each = 20),
+    Treatment = rep(c("Control", "Drug"), times = 20),
+    row.names = colnames(expr_matrix)
+  )
+  
+  # Create SeuratObject
+  seurat_obj <- SeuratObject::CreateSeuratObject(
+    counts = expr_matrix,
+    meta.data = metadata
+  )
+  
+  # Run analysis
+  result <- AnalyzeWithZINB(seurat_obj, 
+                           groupByColumns = c("CellType", "Treatment"),
+                           verbose = FALSE)
+  
+  # Verify key format
+  expected_keys <- c("TypeA_Control", "TypeA_Drug", "TypeB_Control", "TypeB_Drug")
+  actual_keys <- unique(result$combined_parameters$key)
+  expect_equal(sort(actual_keys), sort(expected_keys))
+  
+  # Verify key_colnames
+  expect_equal(unique(result$combined_parameters$key_colnames), "CellType|Treatment")
+  
+  # Verify n_datapoints is populated
+  expect_true(all(result$combined_parameters$n_datapoints > 0))
+  expect_equal(unique(result$combined_parameters$n_datapoints), 10)  # 10 cells per subset
+})
+
+test_that("AnalyzeWithZINB parallel processing works", {
+  skip_if_not_installed("SeuratObject")
+  skip_if_not_installed("pscl")
+  skip_if_not_installed("future")
+  skip_if_not_installed("future.apply")
+  
+  set.seed(666)
+  n_cells <- 40
+  n_genes <- 10
+  
+  # Create expression matrix
+  expr_matrix <- matrix(
+    rpois(n_genes * n_cells, lambda = 7),
+    nrow = n_genes,
+    ncol = n_cells,
+    dimnames = list(paste0("Gene", 1:n_genes), paste0("Cell", 1:n_cells))
+  )
+  
+  # Create metadata
+  metadata <- data.frame(
+    CellType = rep(c("TypeA", "TypeB"), each = 20),
+    row.names = colnames(expr_matrix)
+  )
+  
+  # Create SeuratObject
+  seurat_obj <- SeuratObject::CreateSeuratObject(
+    counts = expr_matrix,
+    meta.data = metadata
+  )
+  
+  # Run with parallel processing
+  result_parallel <- AnalyzeWithZINB(seurat_obj, 
+                                    groupByColumns = "CellType",
+                                    parallel = TRUE,
+                                    numWorkers = 2,
+                                    verbose = FALSE)
+  
+  # Run without parallel processing for comparison
+  result_sequential <- AnalyzeWithZINB(seurat_obj, 
+                                      groupByColumns = "CellType",
+                                      parallel = FALSE,
+                                      verbose = FALSE)
+  
+  # Results should be identical (parameter values may differ slightly due to randomness)
+  expect_equal(length(result_parallel$model_parameters), 
+               length(result_sequential$model_parameters))
+  expect_equal(names(result_parallel$model_parameters), 
+               names(result_sequential$model_parameters))
+  
+  # Timing should be recorded
+  expect_s3_class(result_parallel$timing, "data.frame")
+  expect_true(nrow(result_parallel$timing) > 0)
 })

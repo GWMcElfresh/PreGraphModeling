@@ -15,8 +15,13 @@ Imports:
     SeuratObject,
     pscl,
     Matrix,
-    methods
+    methods,
+    parallel
 Suggests:
     testthat (>= 3.0.0),
-    Seurat
+    Seurat,
+    future,
+    future.apply,
+    HDF5Array,
+    DelayedArray
 Config/testthat/edition: 3
