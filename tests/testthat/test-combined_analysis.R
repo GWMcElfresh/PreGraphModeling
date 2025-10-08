@@ -1,4 +1,4 @@
-test_that("AnalyzeWithZINB integrates pseudobulking and modeling", {
+test_that("AnalyzeWithZINB integrates subsetting and modeling", {
   skip_if_not_installed("SeuratObject")
   skip_if_not_installed("pscl")
   
@@ -35,22 +35,27 @@ test_that("AnalyzeWithZINB integrates pseudobulking and modeling", {
   
   # Verify structure
   expect_type(result, "list")
-  expect_named(result, c("pseudobulk_matrix", "group_metadata", "model_parameters"))
+  expect_named(result, c("subset_matrices", "group_metadata", "model_parameters"))
   
-  # Verify pseudobulk results
-  expect_true(is.matrix(result$pseudobulk_matrix))
-  expect_equal(nrow(result$pseudobulk_matrix), n_genes)
-  expect_equal(ncol(result$pseudobulk_matrix), 3)  # 3 cell types
+  # Verify subset results
+  expect_type(result$subset_matrices, "list")
+  expect_equal(length(result$subset_matrices), 3)  # 3 cell types
   
   # Verify metadata
   expect_s3_class(result$group_metadata, "data.frame")
   expect_equal(nrow(result$group_metadata), 3)
   
-  # Verify model parameters
-  expect_s3_class(result$model_parameters, "data.frame")
-  expect_equal(nrow(result$model_parameters), n_genes)
-  expect_true(all(c("gene", "mu", "phi", "pi", "converged") %in% 
-                   colnames(result$model_parameters)))
+  # Verify model parameters (now a list, one per subset)
+  expect_type(result$model_parameters, "list")
+  expect_equal(length(result$model_parameters), 3)
+  
+  # Each model parameter data frame should have the right columns
+  for (params in result$model_parameters) {
+    expect_s3_class(params, "data.frame")
+    expect_equal(nrow(params), n_genes)
+    expect_true(all(c("gene", "mu", "phi", "pi", "converged", "subset") %in% 
+                     colnames(params)))
+  }
 })
 
 test_that("AnalyzeWithZINB works with multiple grouping columns", {
@@ -87,9 +92,10 @@ test_that("AnalyzeWithZINB works with multiple grouping columns", {
                            groupByColumns = c("CellType", "Treatment"),
                            verbose = FALSE)
   
-  # Should create 2 cell types * 2 treatments = 4 pseudobulk samples
-  expect_equal(ncol(result$pseudobulk_matrix), 4)
+  # Should create 2 cell types * 2 treatments = 4 subsets
+  expect_equal(length(result$subset_matrices), 4)
   expect_equal(nrow(result$group_metadata), 4)
+  expect_equal(length(result$model_parameters), 4)
   
   # Verify both grouping columns are in metadata
   expect_true(all(c("CellType", "Treatment") %in% colnames(result$group_metadata)))
@@ -130,12 +136,16 @@ test_that("AnalyzeWithZINB respects gene subset parameter", {
                            geneSubset = gene_subset,
                            verbose = FALSE)
   
-  # Should only have models for specified genes
-  expect_equal(nrow(result$model_parameters), length(gene_subset))
-  expect_equal(result$model_parameters$gene, gene_subset)
+  # Should only have models for specified genes in each subset
+  for (params in result$model_parameters) {
+    expect_equal(nrow(params), length(gene_subset))
+    expect_equal(params$gene, gene_subset)
+  }
   
-  # But pseudobulk matrix should have all genes
-  expect_equal(nrow(result$pseudobulk_matrix), n_genes)
+  # But subset matrices should have all genes
+  for (subset_mat in result$subset_matrices) {
+    expect_equal(nrow(subset_mat), n_genes)
+  }
 })
 
 test_that("AnalyzeWithZINB propagates parameters correctly", {
@@ -176,7 +186,14 @@ test_that("AnalyzeWithZINB propagates parameters correctly", {
                            minNonZero = 5,
                            verbose = FALSE)
   
-  # Genes with pseudobulk samples having < 5 non-zeros should have NA parameters
-  # Since we group into 2 samples, genes 1-3 will have very few non-zeros per sample
-  expect_true(any(is.na(result$model_parameters$mu)))
+  # Genes with subsets having < 5 non-zeros should have NA parameters
+  # Check that at least some models have NA (due to sparse data)
+  has_na <- FALSE
+  for (params in result$model_parameters) {
+    if (any(is.na(params$mu))) {
+      has_na <- TRUE
+      break
+    }
+  }
+  expect_true(has_na)
 })

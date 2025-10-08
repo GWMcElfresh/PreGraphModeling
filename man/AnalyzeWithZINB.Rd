@@ -2,7 +2,7 @@
 % Please edit documentation in R/combined_analysis.R
 \name{AnalyzeWithZINB}
 \alias{AnalyzeWithZINB}
-\title{Pseudobulk and Fit ZINB Models in One Step}
+\title{Subset and Fit ZINB Models in One Step}
 \usage{
 AnalyzeWithZINB(
   seuratObject,
@@ -18,7 +18,7 @@ AnalyzeWithZINB(
 \item{seuratObject}{A Seurat object or SeuratObject containing single-cell data}
 
 \item{groupByColumns}{Character vector of metadata column names to group by.
-Multiple columns can be specified to create fine-grained pseudobulk groups.}
+Multiple columns can be specified to create fine-grained subsets.}
 
 \item{assay}{Character string specifying which assay to use (default: "RNA")}
 
@@ -35,16 +35,16 @@ If NULL, models are fit for all genes (default: NULL).}
 \value{
 A list with three elements:
   \itemize{
-    \item pseudobulk_matrix: The pseudobulked expression matrix
-    \item group_metadata: Metadata for each pseudobulk sample
-    \item model_parameters: Data frame with estimated ZINB parameters for each gene
+    \item subset_matrices: List of expression matrices, one per subset
+    \item group_metadata: Metadata for each subset
+    \item model_parameters: List of data frames with estimated ZINB parameters for each subset
   }
 }
 \description{
-This convenience function combines pseudobulking and zero-inflated negative
-binomial model fitting into a single step. It pseudobulks a Seurat object
-according to specified metadata columns and then fits ZINB models to estimate
-distribution parameters.
+This convenience function combines subsetting and zero-inflated negative
+binomial model fitting into a single step. It subsets a Seurat object
+according to specified metadata columns and then fits ZINB models to each
+subset to estimate distribution parameters.
 }
 \examples{
 \dontrun{
@@ -55,7 +55,7 @@ result <- AnalyzeWithZINB(seurat_obj, groupByColumns = "CellType")
 result <- AnalyzeWithZINB(seurat_obj, 
                          groupByColumns = c("CellType", "Sample"))
 
-# Access results
-head(result$model_parameters)
+# Access results for first subset
+head(result$model_parameters[[1]])
 }
 }

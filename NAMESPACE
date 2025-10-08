@@ -3,6 +3,7 @@
 export(AnalyzeWithZINB)
 export(FitZeroInflatedModels)
 export(PseudobulkSeurat)
+export(SubsetSeurat)
 importFrom(SeuratObject,GetAssayData)
 importFrom(methods,is)
 importFrom(pscl,zeroinfl)

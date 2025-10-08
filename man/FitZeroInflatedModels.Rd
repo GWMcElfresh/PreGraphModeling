@@ -12,8 +12,8 @@ FitZeroInflatedModels(
 )
 }
 \arguments{
-\item{expressionMatrix}{A numeric matrix where rows are genes and columns are samples.
-Can be the pseudobulk_matrix output from PseudobulkSeurat.}
+\item{expressionMatrix}{A numeric matrix where rows are genes and columns are cells.
+Can be a single matrix or one from the subset_matrices output from SubsetSeurat.}
 
 \item{geneSubset}{Optional character vector of gene names to fit models for.
 If NULL, models are fit for all genes (default: NULL).}
@@ -41,14 +41,14 @@ phi (dispersion), and pi (probability of zero).
 }
 \examples{
 \dontrun{
-# After pseudobulking
-result <- PseudobulkSeurat(seurat_obj, groupByColumns = "CellType")
+# After subsetting
+result <- SubsetSeurat(seurat_obj, groupByColumns = "CellType")
 
-# Fit ZINB models to all genes
-params <- FitZeroInflatedModels(result$pseudobulk_matrix)
+# Fit ZINB models to all genes in first subset
+params <- FitZeroInflatedModels(result$subset_matrices[[1]])
 
 # Fit models to subset of genes
-params <- FitZeroInflatedModels(result$pseudobulk_matrix, 
+params <- FitZeroInflatedModels(result$subset_matrices[[1]], 
                                  geneSubset = c("CD3D", "CD4", "CD8A"))
 }
 }

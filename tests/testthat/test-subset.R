@@ -1,4 +1,4 @@
-test_that("PseudobulkSeurat works with single metadata column", {
+test_that("SubsetSeurat works with single metadata column", {
   skip_if_not_installed("SeuratObject")
   
   # Create a minimal test Seurat-like object
@@ -26,17 +26,22 @@ test_that("PseudobulkSeurat works with single metadata column", {
     meta.data = metadata
   )
   
-  # Test pseudobulking
-  result <- PseudobulkSeurat(seurat_obj, groupByColumns = "CellType")
+  # Test subsetting
+  result <- SubsetSeurat(seurat_obj, groupByColumns = "CellType")
   
   # Verify structure
   expect_type(result, "list")
-  expect_named(result, c("pseudobulk_matrix", "group_metadata"))
+  expect_named(result, c("subset_matrices", "group_metadata"))
   
-  # Verify pseudobulk matrix
-  expect_true(is.matrix(result$pseudobulk_matrix))
-  expect_equal(nrow(result$pseudobulk_matrix), n_genes)
-  expect_equal(ncol(result$pseudobulk_matrix), 3)  # 3 cell types
+  # Verify subset matrices
+  expect_type(result$subset_matrices, "list")
+  expect_equal(length(result$subset_matrices), 3)  # 3 cell types
+  
+  # Each subset should be a matrix with all genes and subset of cells
+  for (subset_mat in result$subset_matrices) {
+    expect_true(is.matrix(subset_mat))
+    expect_equal(nrow(subset_mat), n_genes)
+  }
   
   # Verify metadata
   expect_s3_class(result$group_metadata, "data.frame")
@@ -48,7 +53,7 @@ test_that("PseudobulkSeurat works with single metadata column", {
   expect_equal(sum(result$group_metadata$n_cells), n_cells)
 })
 
-test_that("PseudobulkSeurat works with multiple metadata columns", {
+test_that("SubsetSeurat works with multiple metadata columns", {
   skip_if_not_installed("SeuratObject")
   
   set.seed(456)
@@ -76,21 +81,21 @@ test_that("PseudobulkSeurat works with multiple metadata columns", {
     meta.data = metadata
   )
   
-  # Test pseudobulking with multiple columns
-  result <- PseudobulkSeurat(seurat_obj, groupByColumns = c("CellType", "Condition"))
+  # Test subsetting with multiple columns
+  result <- SubsetSeurat(seurat_obj, groupByColumns = c("CellType", "Condition"))
   
   # Should have 2 cell types * 2 conditions = 4 groups
-  expect_equal(ncol(result$pseudobulk_matrix), 4)
+  expect_equal(length(result$subset_matrices), 4)
   expect_equal(nrow(result$group_metadata), 4)
   
   # Verify both columns are in metadata
   expect_true(all(c("CellType", "Condition") %in% colnames(result$group_metadata)))
 })
 
-test_that("PseudobulkSeurat validates input correctly", {
+test_that("SubsetSeurat validates input correctly", {
   # Test with invalid input object
   expect_error(
-    PseudobulkSeurat("not a seurat object", groupByColumns = "CellType"),
+    SubsetSeurat("not a seurat object", groupByColumns = "CellType"),
     "must be a Seurat or SeuratObject"
   )
   
@@ -103,26 +108,58 @@ test_that("PseudobulkSeurat validates input correctly", {
   seurat_obj <- SeuratObject::CreateSeuratObject(counts = expr_matrix, meta.data = metadata)
   
   expect_error(
-    PseudobulkSeurat(seurat_obj, groupByColumns = character(0)),
+    SubsetSeurat(seurat_obj, groupByColumns = character(0)),
     "must be a non-empty character vector"
   )
   
   expect_error(
-    PseudobulkSeurat(seurat_obj, groupByColumns = 123),
+    SubsetSeurat(seurat_obj, groupByColumns = 123),
     "must be a non-empty character vector"
   )
   
   # Test with non-existent metadata column
   expect_error(
-    PseudobulkSeurat(seurat_obj, groupByColumns = "NonExistent"),
+    SubsetSeurat(seurat_obj, groupByColumns = "NonExistent"),
     "Metadata columns not found"
   )
 })
 
-test_that("PseudobulkSeurat aggregates counts correctly", {
+test_that("PseudobulkSeurat is alias for SubsetSeurat (backward compatibility)", {
   skip_if_not_installed("SeuratObject")
   
-  # Create a simple test case where we can verify the sums
+  set.seed(789)
+  n_cells <- 50
+  n_genes <- 20
+  
+  expr_matrix <- matrix(
+    rpois(n_genes * n_cells, lambda = 5),
+    nrow = n_genes,
+    ncol = n_cells,
+    dimnames = list(paste0("Gene", 1:n_genes), paste0("Cell", 1:n_cells))
+  )
+  
+  metadata <- data.frame(
+    CellType = rep(c("TypeA", "TypeB"), length.out = n_cells),
+    row.names = colnames(expr_matrix)
+  )
+  
+  seurat_obj <- SeuratObject::CreateSeuratObject(
+    counts = expr_matrix,
+    meta.data = metadata
+  )
+  
+  # Both functions should return the same results
+  result1 <- SubsetSeurat(seurat_obj, groupByColumns = "CellType")
+  result2 <- PseudobulkSeurat(seurat_obj, groupByColumns = "CellType")
+  
+  expect_equal(result1$subset_matrices, result2$subset_matrices)
+  expect_equal(result1$group_metadata, result2$group_metadata)
+})
+
+test_that("SubsetSeurat subsets cells correctly", {
+  skip_if_not_installed("SeuratObject")
+  
+  # Create a simple test case where we can verify the subsetting
   expr_matrix <- matrix(
     c(1, 2, 3, 4,
       5, 6, 7, 8,
@@ -139,14 +176,18 @@ test_that("PseudobulkSeurat aggregates counts correctly", {
   )
   
   seurat_obj <- SeuratObject::CreateSeuratObject(counts = expr_matrix, meta.data = metadata)
-  result <- PseudobulkSeurat(seurat_obj, groupByColumns = "Group")
+  result <- SubsetSeurat(seurat_obj, groupByColumns = "Group")
   
-  # Verify sums for each gene/group combination
-  # Gene1, Group A: 1 + 2 = 3
-  # Gene1, Group B: 3 + 4 = 7
-  expect_equal(as.numeric(result$pseudobulk_matrix[1, ]), c(3, 7))
+  # Verify subsets contain the right cells
+  # Group A should have cells 1 and 2
+  expect_equal(ncol(result$subset_matrices$A), 2)
+  expect_equal(colnames(result$subset_matrices$A), c("Cell1", "Cell2"))
   
-  # Gene2, Group A: 5 + 6 = 11
-  # Gene2, Group B: 7 + 8 = 15
-  expect_equal(as.numeric(result$pseudobulk_matrix[2, ]), c(11, 15))
+  # Group B should have cells 3 and 4
+  expect_equal(ncol(result$subset_matrices$B), 2)
+  expect_equal(colnames(result$subset_matrices$B), c("Cell3", "Cell4"))
+  
+  # Verify values are preserved (not summed)
+  expect_equal(as.numeric(result$subset_matrices$A[1, ]), c(1, 2))
+  expect_equal(as.numeric(result$subset_matrices$B[1, ]), c(3, 4))
 })

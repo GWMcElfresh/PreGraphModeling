@@ -1,19 +1,19 @@
-#' Pseudobulk Seurat Object by Metadata Columns
+#' Subset Seurat Object by Metadata Columns
 #'
-#' This function takes a Seurat object and pseudobulks the expression data
-#' according to specified metadata columns. Cells sharing the same values
-#' across all specified metadata columns are aggregated together.
+#' This function takes a Seurat object and subsets the expression data
+#' according to specified metadata columns. Returns a list of expression matrices,
+#' one for each unique combination of metadata values.
 #'
 #' @param seuratObject A Seurat object or SeuratObject containing single-cell data
 #' @param groupByColumns Character vector of metadata column names to group by.
-#'   Multiple columns can be specified to create fine-grained pseudobulk groups.
+#'   Multiple columns can be specified to create fine-grained subsets.
 #' @param assay Character string specifying which assay to use (default: "RNA")
 #' @param slot Character string specifying which slot to use (default: "counts")
 #'
 #' @return A list with two elements:
 #'   \itemize{
-#'     \item pseudobulk_matrix: A matrix where rows are genes and columns are pseudobulk samples
-#'     \item group_metadata: A data frame containing the metadata for each pseudobulk sample
+#'     \item subset_matrices: A list of expression matrices, one per unique metadata combination
+#'     \item group_metadata: A data frame containing the metadata for each subset
 #'   }
 #'
 #' @export
@@ -21,17 +21,17 @@
 #' @importFrom methods is
 #' @examples
 #' \dontrun{
-#' # Pseudobulk by cell type
-#' result <- PseudobulkSeurat(seurat_obj, groupByColumns = "CellType")
+#' # Subset by cell type
+#' result <- SubsetSeurat(seurat_obj, groupByColumns = "CellType")
 #' 
-#' # Pseudobulk by multiple columns
-#' result <- PseudobulkSeurat(seurat_obj, 
-#'                            groupByColumns = c("CellType", "Sample", "Condition"))
+#' # Subset by multiple columns
+#' result <- SubsetSeurat(seurat_obj, 
+#'                        groupByColumns = c("CellType", "Sample", "Condition"))
 #' }
-PseudobulkSeurat <- function(seuratObject, 
-                             groupByColumns, 
-                             assay = "RNA",
-                             slot = "counts") {
+SubsetSeurat <- function(seuratObject, 
+                         groupByColumns, 
+                         assay = "RNA",
+                         slot = "counts") {
   
   # Input validation
   if (!methods::is(seuratObject, "Seurat") && !methods::is(seuratObject, "SeuratObject")) {
@@ -71,27 +71,20 @@ PseudobulkSeurat <- function(seuratObject,
   unique_groups <- unique(group_factor)
   n_groups <- length(unique_groups)
   
-  # Initialize pseudobulk matrix
-  pseudobulk_matrix <- matrix(0, 
-                               nrow = nrow(expr_data), 
-                               ncol = n_groups,
-                               dimnames = list(rownames(expr_data), unique_groups))
+  # Create list of subset matrices
+  subset_matrices <- list()
   
-  # Aggregate expression by summing across cells in each group
   for (i in seq_along(unique_groups)) {
     group_name <- unique_groups[i]
     group_cells <- which(group_factor == group_name)
     
-    if (length(group_cells) == 1) {
-      pseudobulk_matrix[, i] <- expr_data[, group_cells]
-    } else {
-      pseudobulk_matrix[, i] <- Matrix::rowSums(expr_data[, group_cells])
-    }
+    # Extract subset of cells for this group
+    subset_matrices[[group_name]] <- as.matrix(expr_data[, group_cells, drop = FALSE])
   }
   
-  # Create metadata for pseudobulk samples
+  # Create metadata for subsets
   group_metadata <- data.frame(
-    pseudobulk_id = unique_groups,
+    subset_id = unique_groups,
     stringsAsFactors = FALSE
   )
   
@@ -109,7 +102,11 @@ PseudobulkSeurat <- function(seuratObject,
   })
   
   return(list(
-    pseudobulk_matrix = pseudobulk_matrix,
+    subset_matrices = subset_matrices,
     group_metadata = group_metadata
   ))
 }
+
+#' @rdname SubsetSeurat
+#' @export
+PseudobulkSeurat <- SubsetSeurat

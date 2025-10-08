@@ -1,13 +1,13 @@
-#' Pseudobulk and Fit ZINB Models in One Step
+#' Subset and Fit ZINB Models in One Step
 #'
-#' This convenience function combines pseudobulking and zero-inflated negative
-#' binomial model fitting into a single step. It pseudobulks a Seurat object
-#' according to specified metadata columns and then fits ZINB models to estimate
-#' distribution parameters.
+#' This convenience function combines subsetting and zero-inflated negative
+#' binomial model fitting into a single step. It subsets a Seurat object
+#' according to specified metadata columns and then fits ZINB models to each
+#' subset to estimate distribution parameters.
 #'
 #' @param seuratObject A Seurat object or SeuratObject containing single-cell data
 #' @param groupByColumns Character vector of metadata column names to group by.
-#'   Multiple columns can be specified to create fine-grained pseudobulk groups.
+#'   Multiple columns can be specified to create fine-grained subsets.
 #' @param assay Character string specifying which assay to use (default: "RNA")
 #' @param slot Character string specifying which slot to use (default: "counts")
 #' @param geneSubset Optional character vector of gene names to fit models for.
@@ -18,9 +18,9 @@
 #'
 #' @return A list with three elements:
 #'   \itemize{
-#'     \item pseudobulk_matrix: The pseudobulked expression matrix
-#'     \item group_metadata: Metadata for each pseudobulk sample
-#'     \item model_parameters: Data frame with estimated ZINB parameters for each gene
+#'     \item subset_matrices: List of expression matrices, one per subset
+#'     \item group_metadata: Metadata for each subset
+#'     \item model_parameters: List of data frames with estimated ZINB parameters for each subset
 #'   }
 #'
 #' @export
@@ -33,8 +33,8 @@
 #' result <- AnalyzeWithZINB(seurat_obj, 
 #'                          groupByColumns = c("CellType", "Sample"))
 #' 
-#' # Access results
-#' head(result$model_parameters)
+#' # Access results for first subset
+#' head(result$model_parameters[[1]])
 #' }
 AnalyzeWithZINB <- function(seuratObject,
                            groupByColumns,
@@ -45,33 +45,48 @@ AnalyzeWithZINB <- function(seuratObject,
                            verbose = TRUE) {
   
   if (verbose) {
-    message("Step 1: Pseudobulking Seurat object...")
+    message("Step 1: Subsetting Seurat object by metadata columns...")
   }
   
-  # Perform pseudobulking
-  pb_result <- PseudobulkSeurat(seuratObject = seuratObject,
+  # Perform subsetting
+  subset_result <- SubsetSeurat(seuratObject = seuratObject,
                                 groupByColumns = groupByColumns,
                                 assay = assay,
                                 slot = slot)
   
   if (verbose) {
-    message(sprintf("  Created %d pseudobulk samples", ncol(pb_result$pseudobulk_matrix)))
-    message("\nStep 2: Fitting zero-inflated negative binomial models...")
+    message(sprintf("  Created %d subsets", length(subset_result$subset_matrices)))
+    message("\nStep 2: Fitting zero-inflated negative binomial models for each subset...")
   }
   
-  # Fit ZINB models
-  model_params <- FitZeroInflatedModels(expressionMatrix = pb_result$pseudobulk_matrix,
-                                        geneSubset = geneSubset,
-                                        minNonZero = minNonZero,
-                                        verbose = verbose)
+  # Fit ZINB models for each subset
+  model_params_list <- list()
+  
+  for (i in seq_along(subset_result$subset_matrices)) {
+    subset_name <- names(subset_result$subset_matrices)[i]
+    
+    if (verbose) {
+      message(sprintf("  Fitting models for subset: %s", subset_name))
+    }
+    
+    model_params_list[[subset_name]] <- FitZeroInflatedModels(
+      expressionMatrix = subset_result$subset_matrices[[i]],
+      geneSubset = geneSubset,
+      minNonZero = minNonZero,
+      verbose = FALSE
+    )
+    
+    # Add subset identifier to results
+    model_params_list[[subset_name]]$subset <- subset_name
+  }
   
   if (verbose) {
     message("\nAnalysis complete!")
   }
   
   return(list(
-    pseudobulk_matrix = pb_result$pseudobulk_matrix,
-    group_metadata = pb_result$group_metadata,
-    model_parameters = model_params
+    subset_matrices = subset_result$subset_matrices,
+    group_metadata = subset_result$group_metadata,
+    model_parameters = model_params_list
   ))
 }
