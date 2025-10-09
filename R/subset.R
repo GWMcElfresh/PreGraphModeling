@@ -1,0 +1,110 @@
+#' Subset Seurat Object by Metadata Columns
+#'
+#' This function takes a Seurat object and subsets the expression data
+#' according to specified metadata columns. Returns a list of expression matrices,
+#' one for each unique combination of metadata values.
+#'
+#' @param seuratObject A Seurat object or SeuratObject containing single-cell data
+#' @param groupByColumns Character vector of metadata column names to group by.
+#'   Multiple columns can be specified to create fine-grained subsets.
+#' @param assay Character string specifying which assay to use (default: "RNA")
+#' @param slot Character string specifying which slot to use (default: "counts")
+#'
+#' @return A list with two elements:
+#'   \itemize{
+#'     \item subset_matrices: A list of expression matrices, one per unique metadata combination
+#'     \item group_metadata: A data frame containing the metadata for each subset
+#'   }
+#'
+#' @export
+#' @importFrom SeuratObject GetAssayData
+#' @importFrom methods is
+#' @examples
+#' \dontrun{
+#' # Subset by cell type
+#' result <- SubsetSeurat(seurat_obj, groupByColumns = "CellType")
+#' 
+#' # Subset by multiple columns
+#' result <- SubsetSeurat(seurat_obj, 
+#'                        groupByColumns = c("CellType", "Sample", "Condition"))
+#' }
+SubsetSeurat <- function(seuratObject, 
+                         groupByColumns, 
+                         assay = "RNA",
+                         slot = "counts") {
+  
+  # Input validation
+  if (!methods::is(seuratObject, "Seurat") && !methods::is(seuratObject, "SeuratObject")) {
+    stop("seuratObject must be a Seurat or SeuratObject")
+  }
+  
+  if (!is.character(groupByColumns) || length(groupByColumns) == 0) {
+    stop("groupByColumns must be a non-empty character vector")
+  }
+  
+  # Check if metadata columns exist
+  metadata <- seuratObject[[]]
+  missing_cols <- setdiff(groupByColumns, colnames(metadata))
+  if (length(missing_cols) > 0) {
+    stop(paste("Metadata columns not found:", paste(missing_cols, collapse = ", ")))
+  }
+  
+  # Get expression data
+  if (methods::is(seuratObject, "Seurat")) {
+    expr_data <- SeuratObject::GetAssayData(seuratObject, assay = assay, slot = slot)
+  } else {
+    # For SeuratObject
+    expr_data <- SeuratObject::GetAssayData(seuratObject, layer = slot)
+  }
+  
+  # Create grouping factor by combining all specified columns
+  if (length(groupByColumns) == 1) {
+    group_factor <- as.character(metadata[[groupByColumns[1]]])
+  } else {
+    group_list <- lapply(groupByColumns, function(col) {
+      as.character(metadata[[col]])
+    })
+    group_factor <- do.call(paste, c(group_list, sep = "_"))
+  }
+  
+  # Get unique groups
+  unique_groups <- unique(group_factor)
+  n_groups <- length(unique_groups)
+  
+  # Create list of subset matrices
+  subset_matrices <- list()
+  
+  for (i in seq_along(unique_groups)) {
+    group_name <- unique_groups[i]
+    group_cells <- which(group_factor == group_name)
+    
+    # Extract subset of cells for this group
+    subset_matrices[[group_name]] <- as.matrix(expr_data[, group_cells, drop = FALSE])
+  }
+  
+  # Create metadata for subsets
+  group_metadata <- data.frame(
+    subset_id = unique_groups,
+    stringsAsFactors = FALSE
+  )
+  
+  # Add original metadata columns
+  for (col in groupByColumns) {
+    group_metadata[[col]] <- sapply(unique_groups, function(g) {
+      idx <- which(group_factor == g)[1]
+      as.character(metadata[[col]][idx])
+    })
+  }
+  
+  # Add cell counts
+  group_metadata$n_cells <- sapply(unique_groups, function(g) {
+    sum(group_factor == g)
+  })
+  
+  return(list(
+    subset_matrices = subset_matrices,
+    group_metadata = group_metadata
+  ))
+}
+
+
