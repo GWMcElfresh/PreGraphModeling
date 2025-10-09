@@ -28,7 +28,8 @@ devtools::install_github("GWMcElfresh/PreGraphModeling")
   - Combined data frame with all results merged
 
 - **Parallel Processing**: Speed up analysis on large datasets
-  - Auto-detects optimal plan (multicore on Linux, multisession on Windows)
+  - Defaults to `multisession` for memory safety across all platforms
+  - Configurable parallel plan (multisession, multicore, cluster)
   - Configurable number of workers
   - Uses `future` and `future.apply` packages
 
@@ -127,10 +128,10 @@ print(result$timing)
 
 ### Parallel Processing
 
-For large datasets, enable parallel processing to speed up model fitting:
+For large datasets, enable parallel processing to speed up model fitting. The default uses `multisession` plan for memory safety:
 
 ```r
-# Use parallel processing with auto-detected number of cores
+# Use parallel processing with auto-detected number of cores (default: multisession)
 result <- AnalyzeWithZINB(
   seuratObject = seurat_obj,
   groupByColumns = c("CellType", "Treatment"),
@@ -138,12 +139,13 @@ result <- AnalyzeWithZINB(
   verbose = TRUE
 )
 
-# Specify number of workers manually
+# Specify number of workers and parallel plan explicitly
 result <- AnalyzeWithZINB(
   seuratObject = seurat_obj,
   groupByColumns = c("CellType", "Treatment"),
   parallel = TRUE,
   numWorkers = 4,
+  parallelPlan = "multisession",  # Options: "multisession", "multicore", "cluster"
   verbose = TRUE
 )
 ```
@@ -170,7 +172,7 @@ result <- AnalyzeWithZINB(
 - `SubsetSeurat()`: Subset Seurat objects by metadata columns
 - `FitZeroInflatedModels()`: Fit ZINB models to expression data
 - `AnalyzeWithZINB()`: Complete workflow combining subsetting and modeling for all subsets
-- `PseudobulkSeurat()`: Alias for `SubsetSeurat()` (for backward compatibility)
+
 
 ### Naming Conventions
 

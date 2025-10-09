@@ -2,12 +2,9 @@
 % Please edit documentation in R/subset.R
 \name{SubsetSeurat}
 \alias{SubsetSeurat}
-\alias{PseudobulkSeurat}
 \title{Subset Seurat Object by Metadata Columns}
 \usage{
 SubsetSeurat(seuratObject, groupByColumns, assay = "RNA", slot = "counts")
-
-PseudobulkSeurat(seuratObject, groupByColumns, assay = "RNA", slot = "counts")
 }
 \arguments{
 \item{seuratObject}{A Seurat object or SeuratObject containing single-cell data}

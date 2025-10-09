@@ -1,7 +1,7 @@
 test_that("FitZeroInflatedModels works with simple data", {
   skip_if_not_installed("pscl")
   
-  set.seed(789)
+  set.seed(42)
   n_samples <- 50
   n_genes <- 10
   
@@ -41,7 +41,7 @@ test_that("FitZeroInflatedModels works with simple data", {
 test_that("FitZeroInflatedModels handles gene subset correctly", {
   skip_if_not_installed("pscl")
   
-  set.seed(321)
+  set.seed(42)
   n_samples <- 30
   n_genes <- 20
   
@@ -92,7 +92,7 @@ test_that("FitZeroInflatedModels validates input correctly", {
 test_that("FitZeroInflatedModels handles genes with few non-zeros", {
   skip_if_not_installed("pscl")
   
-  set.seed(654)
+  set.seed(42)
   n_samples <- 20
   
   # Create matrix where some genes have very few non-zero values
@@ -137,7 +137,7 @@ test_that("FitZeroInflatedModels handles genes with few non-zeros", {
 test_that("FitZeroInflatedModels parameters are in valid ranges", {
   skip_if_not_installed("pscl")
   
-  set.seed(999)
+  set.seed(42)
   n_samples <- 40
   n_genes <- 5
   

@@ -1,9 +1,9 @@
 Package: PreGraphModeling
 Type: Package
-Title: Pseudobulking and Zero-Inflated Modeling for Single Cell Data
+Title: Subsetting and Zero-Inflated Modeling for Single Cell Data
 Version: 0.1.0
 Authors@R: person("Author", "Name", email = "author@example.com", role = c("aut", "cre"))
-Description: Tools for pseudobulking Seurat objects according to metadata columns and 
+Description: Tools for subsetting Seurat objects according to metadata columns and 
     fitting zero-inflated negative binomial models to estimate distribution parameters.
 License: GPL-3 + file LICENSE
 Encoding: UTF-8

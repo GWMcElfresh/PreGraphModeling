@@ -91,7 +91,9 @@ FitZeroInflatedModels <- function(expressionMatrix,
     stringsAsFactors = FALSE
   )
   
-  # Fit models for each gene
+  # ============================================================================
+  # FIT ZINB MODELS FOR EACH GENE
+  # ============================================================================
   for (i in seq_along(genes_to_fit)) {
     gene_name <- genes_to_fit[i]
     
@@ -99,7 +101,9 @@ FitZeroInflatedModels <- function(expressionMatrix,
       message(sprintf("  Processing gene %d of %d...", i, length(genes_to_fit)))
     }
     
-    # Extract gene expression
+    # --------------------------------------------------------------------------
+    # Extract and validate gene expression data
+    # --------------------------------------------------------------------------
     gene_expr <- as.numeric(expressionMatrix[gene_name, ])
     n_nonzero <- sum(gene_expr > 0)
     n_datapoints <- length(gene_expr)
@@ -118,7 +122,9 @@ FitZeroInflatedModels <- function(expressionMatrix,
       next
     }
     
-    # Fit ZINB model
+    # --------------------------------------------------------------------------
+    # Fit ZINB model and extract parameters
+    # --------------------------------------------------------------------------
     tryCatch({
       # Create data frame for modeling
       model_data <- data.frame(counts = gene_expr)

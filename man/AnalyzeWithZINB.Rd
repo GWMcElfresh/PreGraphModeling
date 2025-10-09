@@ -13,6 +13,7 @@ AnalyzeWithZINB(
   minNonZero = 3,
   parallel = FALSE,
   numWorkers = NULL,
+  parallelPlan = NULL,
   verbose = TRUE
 )
 }
@@ -36,6 +37,10 @@ If NULL, models are fit for all genes (default: NULL).}
 
 \item{numWorkers}{Integer specifying number of workers for parallel processing.
 If NULL, uses detectCores()-1 (default: NULL).}
+
+\item{parallelPlan}{Character string specifying the future plan to use for parallel processing.
+Options: "multisession" (default, memory-safe), "multicore" (Unix only, faster but not memory-safe),
+"cluster". If NULL, defaults to "multisession" (default: NULL).}
 
 \item{verbose}{Logical indicating whether to print progress messages (default: TRUE).}
 }
@@ -63,7 +68,8 @@ result <- AnalyzeWithZINB(seurat_obj, groupByColumns = "CellType")
 # Complete analysis with multiple metadata columns and parallel processing
 result <- AnalyzeWithZINB(seurat_obj, 
                          groupByColumns = c("CellType", "Sample"),
-                         parallel = TRUE)
+                         parallel = TRUE,
+                         parallelPlan = "multisession")
 
 # Access results for first subset
 head(result$model_parameters[[1]])

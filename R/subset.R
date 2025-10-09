@@ -107,6 +107,4 @@ SubsetSeurat <- function(seuratObject,
   ))
 }
 
-#' @rdname SubsetSeurat
-#' @export
-PseudobulkSeurat <- SubsetSeurat
+

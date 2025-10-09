@@ -2,7 +2,7 @@ test_that("SubsetSeurat works with single metadata column", {
   skip_if_not_installed("SeuratObject")
   
   # Create a minimal test Seurat-like object
-  set.seed(123)
+  set.seed(42)
   n_cells <- 100
   n_genes <- 50
   
@@ -56,7 +56,7 @@ test_that("SubsetSeurat works with single metadata column", {
 test_that("SubsetSeurat works with multiple metadata columns", {
   skip_if_not_installed("SeuratObject")
   
-  set.seed(456)
+  set.seed(42)
   n_cells <- 120
   n_genes <- 30
   
@@ -122,38 +122,6 @@ test_that("SubsetSeurat validates input correctly", {
     SubsetSeurat(seurat_obj, groupByColumns = "NonExistent"),
     "Metadata columns not found"
   )
-})
-
-test_that("PseudobulkSeurat is alias for SubsetSeurat (backward compatibility)", {
-  skip_if_not_installed("SeuratObject")
-  
-  set.seed(789)
-  n_cells <- 50
-  n_genes <- 20
-  
-  expr_matrix <- matrix(
-    rpois(n_genes * n_cells, lambda = 5),
-    nrow = n_genes,
-    ncol = n_cells,
-    dimnames = list(paste0("Gene", 1:n_genes), paste0("Cell", 1:n_cells))
-  )
-  
-  metadata <- data.frame(
-    CellType = rep(c("TypeA", "TypeB"), length.out = n_cells),
-    row.names = colnames(expr_matrix)
-  )
-  
-  seurat_obj <- SeuratObject::CreateSeuratObject(
-    counts = expr_matrix,
-    meta.data = metadata
-  )
-  
-  # Both functions should return the same results
-  result1 <- SubsetSeurat(seurat_obj, groupByColumns = "CellType")
-  result2 <- PseudobulkSeurat(seurat_obj, groupByColumns = "CellType")
-  
-  expect_equal(result1$subset_matrices, result2$subset_matrices)
-  expect_equal(result1$group_metadata, result2$group_metadata)
 })
 
 test_that("SubsetSeurat subsets cells correctly", {

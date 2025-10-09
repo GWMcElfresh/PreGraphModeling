@@ -17,6 +17,9 @@
 #' @param parallel Logical indicating whether to use parallel processing (default: FALSE).
 #' @param numWorkers Integer specifying number of workers for parallel processing.
 #'   If NULL, uses detectCores()-1 (default: NULL).
+#' @param parallelPlan Character string specifying the future plan to use for parallel processing.
+#'   Options: "multisession" (default, memory-safe), "multicore" (Unix only, faster but not memory-safe),
+#'   "cluster". If NULL, defaults to "multisession" (default: NULL).
 #' @param verbose Logical indicating whether to print progress messages (default: TRUE).
 #'
 #' @return A list with four elements:
@@ -37,7 +40,8 @@
 #' # Complete analysis with multiple metadata columns and parallel processing
 #' result <- AnalyzeWithZINB(seurat_obj, 
 #'                          groupByColumns = c("CellType", "Sample"),
-#'                          parallel = TRUE)
+#'                          parallel = TRUE,
+#'                          parallelPlan = "multisession")
 #' 
 #' # Access results for first subset
 #' head(result$model_parameters[[1]])
@@ -53,16 +57,21 @@ AnalyzeWithZINB <- function(seuratObject,
                            minNonZero = 3,
                            parallel = FALSE,
                            numWorkers = NULL,
+                           parallelPlan = NULL,
                            verbose = TRUE) {
   
-  # Initialize timing data frame
+  # ============================================================================
+  # INITIALIZE TIMING TRACKING
+  # ============================================================================
   timing_data <- data.frame(
     step = character(),
     elapsed_seconds = numeric(),
     stringsAsFactors = FALSE
   )
   
-  # Step 1: Subsetting
+  # ============================================================================
+  # STEP 1: SUBSET SEURAT OBJECT BY METADATA
+  # ============================================================================
   step1_start <- Sys.time()
   if (verbose) {
     message("Step 1: Subsetting Seurat object by metadata columns...")
@@ -86,7 +95,9 @@ AnalyzeWithZINB <- function(seuratObject,
     message("\nStep 2: Fitting zero-inflated negative binomial models for each subset...")
   }
   
-  # Step 2: Fit ZINB models
+  # ============================================================================
+  # STEP 2: FIT ZINB MODELS (PARALLEL OR SEQUENTIAL)
+  # ============================================================================
   step2_start <- Sys.time()
   
   if (parallel) {
@@ -104,15 +115,25 @@ AnalyzeWithZINB <- function(seuratObject,
       numWorkers <- max(1, parallel::detectCores() - 1)
     }
     
-    if (verbose) {
-      message(sprintf("  Using parallel processing with %d workers", numWorkers))
+    # Default to multisession for memory safety
+    if (is.null(parallelPlan)) {
+      parallelPlan <- "multisession"
     }
     
-    # Auto-detect plan based on OS
-    if (.Platform$OS.type == "windows") {
+    if (verbose) {
+      message(sprintf("  Using parallel processing with %d workers (plan: %s)", 
+                     numWorkers, parallelPlan))
+    }
+    
+    # Set future plan based on user specification
+    if (parallelPlan == "multisession") {
       future::plan(future::multisession, workers = numWorkers)
-    } else {
+    } else if (parallelPlan == "multicore") {
       future::plan(future::multicore, workers = numWorkers)
+    } else if (parallelPlan == "cluster") {
+      future::plan(future::cluster, workers = numWorkers)
+    } else {
+      stop("Invalid parallelPlan. Must be 'multisession', 'multicore', or 'cluster'")
     }
     
     # Fit models in parallel
@@ -170,7 +191,9 @@ AnalyzeWithZINB <- function(seuratObject,
     message("\nStep 3: Merging results and creating keys...")
   }
   
-  # Step 3: Merge results with keys
+  # ============================================================================
+  # STEP 3: MERGE RESULTS AND CREATE KEY-BASED OUTPUT
+  # ============================================================================
   step3_start <- Sys.time()
   
   # Create key_colnames string
