@@ -90,6 +90,13 @@ FitZeroInflatedModels <- function(expressionMatrix,
     n_datapoints = integer(length(genes_to_fit)),
     stringsAsFactors = FALSE
   )
+  # ============================================================================
+  # GENERATE SIZE FACTORS
+  # ============================================================================
+
+  #unsure how long this will take - it's probably chunkable if it takes a minute for per-cell size factors. 
+  sizeFactors <- DESeq2::estimateSizeFactorsForMatrix(expressionMatrix) 
+  
   
   # ============================================================================
   # FIT ZINB MODELS FOR EACH GENE
@@ -127,10 +134,11 @@ FitZeroInflatedModels <- function(expressionMatrix,
     # --------------------------------------------------------------------------
     tryCatch({
       # Create data frame for modeling
-      model_data <- data.frame(counts = gene_expr)
+      model_data <- data.frame(counts = gene_expr, 
+                               log_sizeFactor = log(sizeFactors))
       
       # Fit zero-inflated negative binomial model
-      fit <- pscl::zeroinfl(counts ~ 1 | 1, 
+      fit <- pscl::zeroinfl(counts ~ offset(log_sizeFactor) | 1, 
                             data = model_data,
                             dist = "negbin",
                             link = "logit")
