@@ -1,0 +1,55 @@
+# For help debugging build failures open an issue on the RStudio community with the 'github-actions' tag.
+# https://community.rstudio.com/new-topic?category=Package%20development&tags=github-actions
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, dev ]
+  pull_request:
+  schedule:
+    - cron: "0 6 10 * *"
+
+name: R Build and Checks
+
+jobs:
+  R-CMD-check:
+    runs-on: ubuntu-${{ matrix.config.os }}
+
+    name: ubuntu-${{ matrix.config.os }} (${{ matrix.config.r }} / ${{ matrix.config.bioc }})
+
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - { os: 24.04, r: '4.4', bioc: '3.20', pkgdown: "true" }
+
+    env:
+      R_REMOTES_NO_ERRORS_FROM_WARNINGS: true
+      GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: bimberlabinternal/DevOps/githubActions/r-gh-setup@master
+        with:
+          r_version: ${{ matrix.config.r }}
+          bioc_version: ${{ matrix.config.bioc }}
+          cache_version: ${{ secrets.CACHE_VERSION }}
+        env:
+          GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: r-lib/actions/check-r-package@v2
+        with:
+          args: 'c("--no-manual")'
+        env:
+          _R_CHECK_CRAN_INCOMING_: false
+
+      - name: Install package
+        if: github.ref == 'refs/heads/main' && matrix.config.pkgdown == 'true'
+        run: R CMD INSTALL .
+
+      - name: Deploy package
+        if: github.ref == 'refs/heads/main' && matrix.config.pkgdown == 'true'
+        run: |
+          git config --local user.email "actions@github.com"
+          git config --local user.name "GitHub Actions"
+          Rscript -e 'pkgdown::deploy_to_branch(new_process = FALSE, clean = TRUE)'
