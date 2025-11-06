@@ -92,6 +92,7 @@ test_that("AnalyzeWithZINB works with multiple grouping columns", {
   metadata <- data.frame(
     CellType = rep(c("TypeA", "TypeB"), each = 40),
     Treatment = rep(c("Control", "Drug"), times = 40),
+    Saturation.RNA = runif(n_cells, min = 0, max = 1),
     row.names = colnames(expr_matrix)
   )
 
@@ -134,6 +135,7 @@ test_that("AnalyzeWithZINB respects gene subset parameter", {
   # Create metadata
   metadata <- data.frame(
     Group = rep(c("A", "B"), length.out = n_cells),
+    Saturation.RNA = runif(n_cells, min = 0, max = 1),
     row.names = colnames(expr_matrix)
   )
 
@@ -185,6 +187,7 @@ test_that("AnalyzeWithZINB propagates parameters correctly", {
   # Create metadata
   metadata <- data.frame(
     CellType = rep(c("A", "B"), each = 20),
+    Saturation.RNA = runif(n_cells, min = 0, max = 1),
     row.names = colnames(expr_matrix)
   )
 
@@ -232,6 +235,7 @@ test_that("AnalyzeWithZINB creates proper keys and key_colnames", {
   metadata <- data.frame(
     CellType = rep(c("TypeA", "TypeB"), each = 20),
     Treatment = rep(c("Control", "Drug"), times = 20),
+    Saturation.RNA = runif(n_cells, min = 0, max = 1),
     row.names = colnames(expr_matrix)
   )
 
@@ -284,6 +288,7 @@ test_that("AnalyzeWithZINB parallel processing works", {
   # Create metadata
   metadata <- data.frame(
     CellType = rep(c("TypeA", "TypeB"), each = 20),
+    Saturation.RNA = runif(n_cells, min = 0, max = 1),
     row.names = colnames(expr_matrix)
   )
 
@@ -326,6 +331,7 @@ test_that("AnalyzeWithZINB accepts parallelPlan parameter", {
 
   metadata <- data.frame(
     CellType = rep(c("TypeA", "TypeB"), each = 10),
+    Saturation.RNA = runif(n_cells, min = 0, max = 1),
     row.names = colnames(expr_matrix)
   )
 
