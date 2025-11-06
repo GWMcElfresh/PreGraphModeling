@@ -41,7 +41,7 @@ A data frame with one row per gene containing:
 }
 \description{
 This function fits zero-inflated negative binomial (ZINB) models to gene
-expression data and extracts the estimated parameters: mu (mean), 
+expression data and extracts the estimated parameters: mu (mean),
 phi (dispersion), and pi (probability of zero).
 }
 \examples{
@@ -58,7 +58,7 @@ params <- FitZeroInflatedModels(result$subset_matrices[[1]],
 params <- FitZeroInflatedModels(result$subset_matrices[[1]])
 
 # Fit models to subset of genes
-params <- FitZeroInflatedModels(result$subset_matrices[[1]], 
+params <- FitZeroInflatedModels(result$subset_matrices[[1]],
                                 cellSaturation = result$saturation_vectors[[1]],
                                 geneSubset = c("CD3D", "CD4", "CD8A"))
 }

@@ -25,7 +25,7 @@
 #' out <- residualize_gam(df$sizeFactor, df$saturation, k = 15)
 #' df$sizeFactor_resid <- out$residuals
 #' }
-#'
+#' @importFrom stats as.formula
 #' @export
 residualize_gam <- function(y, x,
                             k = 10, bs = "tp",

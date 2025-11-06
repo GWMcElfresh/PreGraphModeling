@@ -49,5 +49,4 @@ df <- data.frame(sizeFactor = rnorm(200, 10, 2), saturation = runif(200))
 out <- residualize_gam(df$sizeFactor, df$saturation, k = 15)
 df$sizeFactor_resid <- out$residuals
 }
-
 }
