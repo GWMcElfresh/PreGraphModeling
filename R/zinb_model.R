@@ -6,6 +6,8 @@
 #'
 #' @param expressionMatrix A numeric matrix where rows are genes and columns are cells.
 #'   Can be a single matrix or one from the subset_matrices output from SubsetSeurat.
+#' @param cellSaturation Optional numeric vector of cellular saturation values, one per cell.
+#'   If provided, size factors will be residualized against saturation using GAM (default: NULL).
 #' @param geneSubset Optional character vector of gene names to fit models for.
 #'   If NULL, models are fit for all genes (default: NULL).
 #' @param minNonZero Minimum number of non-zero observations required to fit a model.
@@ -29,16 +31,23 @@
 #' @examples
 #' \dontrun{
 #' # After subsetting
-#' result <- SubsetSeurat(seurat_obj, groupByColumns = "CellType")
+#' result <- SubsetSeurat(seurat_obj, groupByColumns = "CellType",
+#'                       saturationColumn = "Saturation.RNA")
 #' 
-#' # Fit ZINB models to all genes in first subset
+#' # Fit ZINB models to all genes in first subset with saturation correction
+#' params <- FitZeroInflatedModels(result$subset_matrices[[1]],
+#'                                 cellSaturation = result$saturation_vectors[[1]])
+#' 
+#' # Fit models without saturation correction
 #' params <- FitZeroInflatedModels(result$subset_matrices[[1]])
 #' 
 #' # Fit models to subset of genes
 #' params <- FitZeroInflatedModels(result$subset_matrices[[1]], 
-#'                                  geneSubset = c("CD3D", "CD4", "CD8A"))
+#'                                 cellSaturation = result$saturation_vectors[[1]],
+#'                                 geneSubset = c("CD3D", "CD4", "CD8A"))
 #' }
 FitZeroInflatedModels <- function(expressionMatrix,
+                                  cellSaturation = NULL,
                                   geneSubset = NULL,
                                   minNonZero = 3,
                                   verbose = TRUE) {
@@ -50,6 +59,16 @@ FitZeroInflatedModels <- function(expressionMatrix,
   
   if (!is.numeric(minNonZero) || minNonZero < 1) {
     stop("minNonZero must be a positive integer")
+  }
+  
+  # Validate cellSaturation if provided
+  if (!is.null(cellSaturation)) {
+    if (!is.numeric(cellSaturation)) {
+      stop("cellSaturation must be a numeric vector")
+    }
+    if (length(cellSaturation) != ncol(expressionMatrix)) {
+      stop("cellSaturation must have the same length as the number of cells in expressionMatrix")
+    }
   }
   
   # Determine genes to process
@@ -91,11 +110,34 @@ FitZeroInflatedModels <- function(expressionMatrix,
     stringsAsFactors = FALSE
   )
   # ============================================================================
-  # GENERATE SIZE FACTORS
+  # ESTIMATE TECHNICAL COVARIATES
   # ============================================================================
 
-  #unsure how long this will take - it's probably chunkable if it takes a minute for per-cell size factors. 
-  sizeFactors <- DESeq2::estimateSizeFactorsForMatrix(expressionMatrix) 
+  if (verbose) {
+    message("Estimating size factors...")
+  }
+  
+  # Estimate size factors for each cell
+  sizeFactors <- DESeq2::estimateSizeFactorsForMatrix(expressionMatrix)
+  
+  # Residualize size factors against saturation if provided
+  if (!is.null(cellSaturation)) {
+    if (verbose) {
+      message("Residualizing size factors against cellular saturation using GAM...")
+    }
+    
+    resid_result <- residualize_gam(y = sizeFactors, x = cellSaturation)
+    sizeFactors <- resid_result$residuals
+    
+    # Handle any remaining NAs by using original size factors
+    na_idx <- is.na(sizeFactors)
+    if (any(na_idx)) {
+      if (verbose) {
+        message(sprintf("  Warning: %d cells had NA residuals, using original size factors", sum(na_idx)))
+      }
+      sizeFactors[na_idx] <- DESeq2::estimateSizeFactorsForMatrix(expressionMatrix)[na_idx]
+    }
+  } 
   
   
   # ============================================================================

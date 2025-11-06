@@ -3,6 +3,7 @@
 export(AnalyzeWithZINB)
 export(FitZeroInflatedModels)
 export(SubsetSeurat)
+export(residualize_gam)
 importFrom(SeuratObject,GetAssayData)
 importFrom(methods,is)
 importFrom(pscl,zeroinfl)

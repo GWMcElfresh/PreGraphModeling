@@ -15,12 +15,14 @@ devtools::install_github("GWMcElfresh/PreGraphModeling")
   - Supports multiple metadata columns for fine-grained subsets
   - Works with Seurat and SeuratObject
   - Each unique combination of metadata values creates a separate subset
+  - Optional extraction of cellular saturation values for technical covariate correction
   
 - **Zero-Inflated Modeling**: Fit ZINB models using `pscl` package
   - Estimates mean (mu), dispersion (phi), and zero-inflation probability (pi)
   - Fits separate models to each subset
   - Handles sparse single-cell count data effectively
   - Returns total datapoints (n_datapoints) for each gene
+  - Optional residualization of size factors against cellular saturation using GAM
 
 - **Key-based Results**: Easy joining and merging
   - Delimited keys (e.g., "CellType1|Treatment1") for each subset
@@ -92,9 +94,28 @@ head(zinb_params)
 
 ```r
 # Perform subsetting and ZINB modeling for all subsets in one step
+# By default, uses "Saturation.RNA" column to residualize size factors
 result <- AnalyzeWithZINB(
   seuratObject = seurat_obj,
   groupByColumns = c("CellType", "Treatment"),
+  minNonZero = 3,
+  verbose = TRUE
+)
+
+# Use a different saturation column
+result <- AnalyzeWithZINB(
+  seuratObject = seurat_obj,
+  groupByColumns = c("CellType", "Treatment"),
+  saturationColumn = "percent.mito",  # or any other technical covariate
+  minNonZero = 3,
+  verbose = TRUE
+)
+
+# Disable saturation correction
+result <- AnalyzeWithZINB(
+  seuratObject = seurat_obj,
+  groupByColumns = c("CellType", "Treatment"),
+  saturationColumn = NULL,  # No residualization
   minNonZero = 3,
   verbose = TRUE
 )
