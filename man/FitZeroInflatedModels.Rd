@@ -6,6 +6,7 @@
 \usage{
 FitZeroInflatedModels(
   expressionMatrix,
+  cellSaturation = NULL,
   geneSubset = NULL,
   minNonZero = 3,
   verbose = TRUE
@@ -14,6 +15,9 @@ FitZeroInflatedModels(
 \arguments{
 \item{expressionMatrix}{A numeric matrix where rows are genes and columns are cells.
 Can be a single matrix or one from the subset_matrices output from SubsetSeurat.}
+
+\item{cellSaturation}{Optional numeric vector of cellular saturation values, one per cell.
+If provided, size factors will be residualized against saturation using GAM (default: NULL).}
 
 \item{geneSubset}{Optional character vector of gene names to fit models for.
 If NULL, models are fit for all genes (default: NULL).}
@@ -37,19 +41,25 @@ A data frame with one row per gene containing:
 }
 \description{
 This function fits zero-inflated negative binomial (ZINB) models to gene
-expression data and extracts the estimated parameters: mu (mean), 
+expression data and extracts the estimated parameters: mu (mean),
 phi (dispersion), and pi (probability of zero).
 }
 \examples{
 \dontrun{
 # After subsetting
-result <- SubsetSeurat(seurat_obj, groupByColumns = "CellType")
+result <- SubsetSeurat(seurat_obj, groupByColumns = "CellType",
+                      saturationColumn = "Saturation.RNA")
 
-# Fit ZINB models to all genes in first subset
+# Fit ZINB models to all genes in first subset with saturation correction
+params <- FitZeroInflatedModels(result$subset_matrices[[1]],
+                                cellSaturation = result$saturation_vectors[[1]])
+
+# Fit models without saturation correction
 params <- FitZeroInflatedModels(result$subset_matrices[[1]])
 
 # Fit models to subset of genes
-params <- FitZeroInflatedModels(result$subset_matrices[[1]], 
-                                 geneSubset = c("CD3D", "CD4", "CD8A"))
+params <- FitZeroInflatedModels(result$subset_matrices[[1]],
+                                cellSaturation = result$saturation_vectors[[1]],
+                                geneSubset = c("CD3D", "CD4", "CD8A"))
 }
 }

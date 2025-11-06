@@ -4,7 +4,13 @@
 \alias{SubsetSeurat}
 \title{Subset Seurat Object by Metadata Columns}
 \usage{
-SubsetSeurat(seuratObject, groupByColumns, assay = "RNA", slot = "counts")
+SubsetSeurat(
+  seuratObject,
+  groupByColumns,
+  assay = "RNA",
+  layer = "counts",
+  saturationColumn = NULL
+)
 }
 \arguments{
 \item{seuratObject}{A Seurat object or SeuratObject containing single-cell data}
@@ -14,13 +20,17 @@ Multiple columns can be specified to create fine-grained subsets.}
 
 \item{assay}{Character string specifying which assay to use (default: "RNA")}
 
-\item{slot}{Character string specifying which slot to use (default: "counts")}
+\item{layer}{Character string specifying which layer to use (default: "counts")}
+
+\item{saturationColumn}{Character string specifying the metadata column containing
+cellular saturation values. If NULL, no saturation data is extracted (default: NULL)}
 }
 \value{
-A list with two elements:
+A list with three elements:
   \itemize{
     \item subset_matrices: A list of expression matrices, one per unique metadata combination
     \item group_metadata: A data frame containing the metadata for each subset
+    \item saturation_vectors: A list of numeric vectors containing saturation values for each subset (only if saturationColumn is provided)
   }
 }
 \description{
@@ -34,7 +44,15 @@ one for each unique combination of metadata values.
 result <- SubsetSeurat(seurat_obj, groupByColumns = "CellType")
 
 # Subset by multiple columns
-result <- SubsetSeurat(seurat_obj, 
+result <- SubsetSeurat(seurat_obj,
                        groupByColumns = c("CellType", "Sample", "Condition"))
+
+# Subset and extract saturation values for residualization
+result <- SubsetSeurat(seurat_obj,
+                       groupByColumns = "CellType",
+                       saturationColumn = "Saturation.RNA")
+
+# Access saturation vectors
+head(result$saturation_vectors[[1]])
 }
 }

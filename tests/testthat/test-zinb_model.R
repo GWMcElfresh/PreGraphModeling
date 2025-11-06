@@ -170,3 +170,72 @@ test_that("FitZeroInflatedModels parameters are in valid ranges", {
     expect_true(all(result$pi[converged_rows] <= 1))
   }
 })
+
+test_that("FitZeroInflatedModels handles cellular saturation correctly", {
+  skip_if_not_installed("pscl")
+  skip_if_not_installed("mgcv")
+  
+  set.seed(123)
+  n_samples <- 60
+  n_genes <- 8
+  
+  # Create expression matrix
+  expr_matrix <- matrix(
+    rpois(n_genes * n_samples, lambda = 8),
+    nrow = n_genes,
+    ncol = n_samples,
+    dimnames = list(paste0("Gene", 1:n_genes), paste0("Cell", 1:n_samples))
+  )
+  
+  # Add some zeros
+  zero_mask <- matrix(rbinom(n_genes * n_samples, 1, 0.25), nrow = n_genes)
+  expr_matrix[zero_mask == 1] <- 0
+  
+  # Create cellular saturation values (between 0 and 1)
+  cell_saturation <- runif(n_samples, min = 0.3, max = 0.95)
+  
+  # Test with saturation
+  result_with_sat <- FitZeroInflatedModels(expr_matrix, 
+                                           cellSaturation = cell_saturation,
+                                           verbose = FALSE)
+  
+  # Test without saturation
+  result_without_sat <- FitZeroInflatedModels(expr_matrix, 
+                                              cellSaturation = NULL,
+                                              verbose = FALSE)
+  
+  # Both should have same structure
+  expect_s3_class(result_with_sat, "data.frame")
+  expect_s3_class(result_without_sat, "data.frame")
+  expect_equal(nrow(result_with_sat), n_genes)
+  expect_equal(nrow(result_without_sat), n_genes)
+  
+  # Parameters may differ due to residualization
+  # Just verify that models can run with saturation
+  expect_named(result_with_sat, c("gene", "mu", "phi", "pi", "converged", "n_nonzero", "n_datapoints"))
+})
+
+test_that("FitZeroInflatedModels validates cellSaturation input", {
+  set.seed(42)
+  n_samples <- 20
+  n_genes <- 5
+  
+  expr_matrix <- matrix(
+    rpois(n_genes * n_samples, lambda = 5),
+    nrow = n_genes,
+    ncol = n_samples,
+    dimnames = list(paste0("Gene", 1:n_genes), paste0("Cell", 1:n_samples))
+  )
+  
+  # Test with wrong length
+  expect_error(
+    FitZeroInflatedModels(expr_matrix, cellSaturation = runif(10)),
+    "must have the same length"
+  )
+  
+  # Test with non-numeric
+  expect_error(
+    FitZeroInflatedModels(expr_matrix, cellSaturation = rep("high", n_samples)),
+    "must be a numeric vector"
+  )
+})
