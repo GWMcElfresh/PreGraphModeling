@@ -20,7 +20,8 @@ residualize_gam(
 
 \item{x}{Numeric predictor (e.g. saturation).}
 
-\item{k}{Integer, basis dimension for the smooth (passed to mgcv::s). Default 10.}
+\item{k}{Integer, maximum basis dimension for the smooth (passed to mgcv::s). Default 10.
+Will be automatically reduced if there are fewer unique x values.}
 
 \item{bs}{Character, smooth basis type (passed to mgcv::s). Default "tp".}
 
@@ -36,12 +37,15 @@ residualize_gam(
 A list with elements:
 \describe{
   \item{residuals}{Numeric vector of residuals (same length as y).}
-  \item{fitted}{Fitted values from the GAM (NA where fit not possible).}
-  \item{model}{The fitted mgcv model object (or NULL if not fit).}
+  \item{fitted}{Fitted values from the GAM or linear model (NA where fit not possible).}
+  \item{model}{The fitted mgcv model object or lm object (or NULL if not fit).}
 }
 }
 \description{
 Fit a univariate GAM of y on x (a smooth of x) using mgcv and return residuals.
+The function automatically adapts the basis dimension (k) based on the number of
+unique values in x to avoid overfitting. For very small datasets (< 4 unique x values),
+falls back to linear regression.
 }
 \examples{
 \dontrun{

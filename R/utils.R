@@ -2,10 +2,14 @@
 #' Residualize a numeric vector using a GAM fit from mgcv
 #'
 #' Fit a univariate GAM of y on x (a smooth of x) using mgcv and return residuals.
+#' The function automatically adapts the basis dimension (k) based on the number of
+#' unique values in x to avoid overfitting. For very small datasets (< 4 unique x values),
+#' falls back to linear regression.
 #'
 #' @param y Numeric vector to be residualized (e.g. sizeFactor).
 #' @param x Numeric predictor (e.g. saturation).
-#' @param k Integer, basis dimension for the smooth (passed to mgcv::s). Default 10.
+#' @param k Integer, maximum basis dimension for the smooth (passed to mgcv::s). Default 10.
+#'   Will be automatically reduced if there are fewer unique x values.
 #' @param bs Character, smooth basis type (passed to mgcv::s). Default "tp".
 #' @param method Character, smoothing selection method passed to mgcv::gam/bam. Default "REML".
 #' @param family A family object for the GAM. Default gaussian().
@@ -15,8 +19,8 @@
 #' @return A list with elements:
 #' \describe{
 #'   \item{residuals}{Numeric vector of residuals (same length as y).}
-#'   \item{fitted}{Fitted values from the GAM (NA where fit not possible).}
-#'   \item{model}{The fitted mgcv model object (or NULL if not fit).}
+#'   \item{fitted}{Fitted values from the GAM or linear model (NA where fit not possible).}
+#'   \item{model}{The fitted mgcv model object or lm object (or NULL if not fit).}
 #' }
 #'
 #' @examples
@@ -45,13 +49,35 @@ residualize_gam <- function(y, x,
 
   if (length(idx) > 1) {
     df <- data.frame(y = y[idx], saturation = x[idx])
-    fmla <- as.formula(sprintf("y ~ s(saturation, k = %d, bs = '%s')", k, bs))
-    if (use_bam) {
-      model <- mgcv::bam(fmla, data = df, method = method, family = family, ...)
-    } else {
-      model <- mgcv::gam(fmla, data = df, method = method, family = family, ...)
-    }
-    fitted_vals[idx] <- stats::predict(model, newdata = data.frame(saturation = x[idx]))
+    
+    # Adaptive k: ensure k is less than the number of unique x values
+    # GAM requires k < number of unique covariate combinations
+    n_unique <- length(unique(x[idx]))
+    k_adaptive <- min(k, max(3, n_unique - 1))
+    
+    # Try to fit the model with error handling
+    tryCatch({
+      # If we have very few unique values, use linear regression instead
+      if (n_unique < 4) {
+        # Fall back to simple linear model when too few unique values
+        model <- stats::lm(y ~ saturation, data = df)
+        fitted_vals[idx] <- stats::predict(model, newdata = data.frame(saturation = x[idx]))
+      } else {
+        # Use GAM with adaptive k
+        fmla <- as.formula(sprintf("y ~ s(saturation, k = %d, bs = '%s')", k_adaptive, bs))
+        if (use_bam) {
+          model <- mgcv::bam(fmla, data = df, method = method, family = family, ...)
+        } else {
+          model <- mgcv::gam(fmla, data = df, method = method, family = family, ...)
+        }
+        fitted_vals[idx] <- stats::predict(model, newdata = data.frame(saturation = x[idx]))
+      }
+    }, error = function(e) {
+      # If GAM fails, fall back to linear model
+      warning(sprintf("GAM fitting failed (%s), falling back to linear model", e$message))
+      model <<- stats::lm(y ~ saturation, data = df)
+      fitted_vals[idx] <<- stats::predict(model, newdata = data.frame(saturation = x[idx]))
+    })
   }
 
   residuals <- y - fitted_vals
