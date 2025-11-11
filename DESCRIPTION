@@ -16,7 +16,6 @@ Depends:
 Imports:
     SeuratObject,
     pscl,
-    Matrix,
     methods,
     parallel,
     DESeq2,
@@ -28,5 +27,6 @@ Suggests:
     future,
     future.apply,
     HDF5Array,
-    DelayedArray
+    DelayedArray, 
+    Matrix
 Config/testthat/edition: 3
