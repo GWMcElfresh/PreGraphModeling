@@ -86,3 +86,41 @@ test_that("residualize_gam works with different parameters", {
   expect_false(is.null(result_k5$model))
   expect_false(is.null(result_k15$model))
 })
+
+test_that("residualize_gam handles small datasets adaptively", {
+  skip_if_not_installed("mgcv")
+  
+  # Test with very few unique x values (should use linear model)
+  set.seed(42)
+  x_few <- rep(c(0.2, 0.5, 0.8), each = 5)  # Only 3 unique values
+  y_few <- 1 + 2 * x_few + rnorm(15, sd = 0.1)
+  
+  result_few <- residualize_gam(y = y_few, x = x_few, k = 10)
+  
+  # Should succeed with linear model fallback
+  expect_type(result_few, "list")
+  expect_false(is.null(result_few$model))
+  expect_equal(length(result_few$residuals), length(y_few))
+  
+  # Test with moderate number of unique values (should use GAM with adaptive k)
+  x_moderate <- runif(50)
+  y_moderate <- 1 + 2 * x_moderate + rnorm(50, sd = 0.1)
+  
+  result_moderate <- residualize_gam(y = y_moderate, x = x_moderate, k = 10)
+  
+  expect_type(result_moderate, "list")
+  expect_false(is.null(result_moderate$model))
+  expect_equal(length(result_moderate$residuals), length(y_moderate))
+  
+  # Test with k larger than unique values
+  x_limited <- rep(1:8, each = 3)  # 8 unique values
+  y_limited <- 1 + 0.5 * x_limited + rnorm(24, sd = 0.1)
+  
+  # This should adapt k to be < 8
+  result_limited <- residualize_gam(y = y_limited, x = x_limited, k = 15)
+  
+  expect_type(result_limited, "list")
+  expect_false(is.null(result_limited$model))
+  expect_equal(length(result_limited$residuals), length(y_limited))
+})
+
