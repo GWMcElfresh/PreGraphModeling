@@ -81,10 +81,10 @@ SubsetSeurat <- function(seuratObject,
 
   # Create grouping factor by combining all specified columns
   if (length(groupByColumns) == 1) {
-    group_factor <- as.character(metadata[[groupByColumns[1]]])
+    group_factor <- gsub("_", ".", as.character(metadata[[groupByColumns[1]]]), fixed = TRUE)
   } else {
     group_list <- lapply(groupByColumns, function(col) {
-      as.character(metadata[[col]])
+      gsub("_", ".", as.character(metadata[[col]]), fixed = TRUE)
     })
     group_factor <- do.call(paste, c(group_list, sep = "_"))
   }
