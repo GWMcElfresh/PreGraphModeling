@@ -1,12 +1,16 @@
 # PreGraphModeling
 
-R package for subsetting Seurat objects by metadata and fitting zero-inflated negative binomial (ZINB) models to estimate distribution parameters for each subset.
+R package for subsetting Seurat objects by metadata and fitting zero-inflated negative binomial (ZINB) models to estimate distribution parameters for each subset. Additionally includes **Restricted Boltzmann Machine (RBM)** functionality for modeling relationships between gene expression features and cell metadata using partial correlations via quasilikelihood.
 
 ## Installation
 
 ```r
 # Install from GitHub
 devtools::install_github("GWMcElfresh/PreGraphModeling")
+
+# Install optional dependencies for RBM visualization
+BiocManager::install(c("ComplexHeatmap", "circlize"))
+install.packages(c("progressr", "viridisLite"))
 ```
 
 ## Features
@@ -23,6 +27,13 @@ devtools::install_github("GWMcElfresh/PreGraphModeling")
   - Handles sparse single-cell count data effectively
   - Returns total datapoints (n_datapoints) for each gene
   - Optional residualization of size factors against cellular saturation using GAM
+
+- **Restricted Boltzmann Machine (RBM)**: Connect features to hidden layers
+  - Estimate partial correlations via quasilikelihood for ZINB, NB, Poisson, or Gaussian families
+  - Fit RBM connecting gene expression features to metadata factors
+  - Parallel processing with `progressr` for progress tracking at scale
+  - Visualization using ComplexHeatmap for partial correlations and weights
+  - Predict hidden layer activations and reconstruct expression patterns
 
 - **Key-based Results**: Easy joining and merging
   - Delimited keys (e.g., "CellType1|Treatment1") for each subset
@@ -186,13 +197,134 @@ result <- AnalyzeWithZINB(
 # Each subset will have models fit for only the genes of interest
 ```
 
+## Restricted Boltzmann Machine (RBM) Analysis
+
+### Basic RBM Workflow
+
+```r
+library(PreGraphModeling)
+library(ComplexHeatmap)
+library(progressr)
+
+# Fit RBM connecting gene expression to cell type metadata
+rbm <- FitRBM(
+  seuratObject = pbmc,
+  visibleFeatures = NULL,  # NULL = use all features
+  hiddenFactors = "CellType",
+  family = "zinb",  # Zero-inflated negative binomial
+  minNonZero = 10,
+  parallel = TRUE,
+  progressr = TRUE,
+  verbose = TRUE
+)
+
+# View RBM summary
+print(rbm)
+summary(rbm)
+```
+
+### Visualize Partial Correlations
+
+```r
+# Create heatmap of partial correlations between genes
+heatmap_pcor <- PlotRBMHeatmap(
+  rbmObject = rbm,
+  cluster_rows = TRUE,
+  cluster_columns = TRUE,
+  color_palette = "RdBu",
+  title = "Gene-Gene Partial Correlations"
+)
+
+# Draw the heatmap
+draw(heatmap_pcor)
+
+# Focus on specific marker genes
+marker_genes <- c("CD3D", "CD8A", "CD4", "CD19", "MS4A1")
+heatmap_markers <- PlotRBMHeatmap(
+  rbmObject = rbm,
+  features = marker_genes,
+  title = "Marker Gene Correlations"
+)
+draw(heatmap_markers)
+```
+
+### Visualize RBM Weights
+
+```r
+# Create heatmap of weights connecting features to metadata
+heatmap_weights <- PlotRBMWeights(
+  rbmObject = rbm,
+  cluster_rows = TRUE,
+  cluster_columns = FALSE,
+  title = "Feature-Metadata Connections"
+)
+draw(heatmap_weights)
+```
+
+### Make Predictions
+
+```r
+# Predict hidden layer (metadata) from new expression data
+new_expr <- GetAssayData(pbmc_new, assay = "RNA", slot = "counts")
+predictions <- predict(rbm, newdata = new_expr, type = "activation")
+
+# Get probability-transformed predictions
+probs <- predict(rbm, newdata = new_expr, type = "probability")
+```
+
+### Estimate Partial Correlations Directly
+
+```r
+# Compute partial correlations without full RBM fitting
+expr_matrix <- GetAssayData(pbmc, assay = "RNA", slot = "counts")
+
+pcor_result <- EstimatePartialCorrelations(
+  expressionMatrix = expr_matrix,
+  family = "zinb",  # Options: "zinb", "nb", "poisson", "gaussian"
+  minNonZero = 10,
+  parallel = TRUE,
+  progressr = TRUE
+)
+
+# Access the partial correlation matrix
+pcor_matrix <- pcor_result$partial_cor
+```
+
+### Multiple Hidden Factors
+
+```r
+# Fit RBM with multiple metadata factors
+rbm_multi <- FitRBM(
+  seuratObject = pbmc,
+  hiddenFactors = c("CellType", "Treatment", "Batch"),
+  family = "zinb",
+  parallel = TRUE
+)
+
+# Visualize weights for each factor
+heatmap_multi <- PlotRBMWeights(
+  rbmObject = rbm_multi,
+  features = marker_genes,
+  factors = "CellType"
+)
+```
+
 ## Function Details
 
 ### Exported Functions
 
+#### ZINB Modeling
 - `SubsetSeurat()`: Subset Seurat objects by metadata columns
 - `FitZeroInflatedModels()`: Fit ZINB models to expression data
 - `AnalyzeWithZINB()`: Complete workflow combining subsetting and modeling for all subsets
+
+#### RBM Functionality
+- `EstimatePartialCorrelations()`: Compute partial correlations via quasilikelihood
+- `FitRBM()`: Fit restricted Boltzmann machine to Seurat object
+- `predict.RBM()`: Predict hidden layer activations from expression
+- `ReconstructRBM()`: Reconstruct expression from hidden layer
+- `PlotRBMHeatmap()`: Visualize partial correlations as heatmap
+- `PlotRBMWeights()`: Visualize RBM weights as heatmap
 
 
 ### Naming Conventions
@@ -269,6 +401,17 @@ devtools::check()
 - Matrix
 - methods
 - parallel
+- DESeq2
+- mgcv
+- stats
+
+### Optional (for full functionality)
+- future, future.apply (for parallel processing)
+- HDF5Array, DelayedArray (for advanced data handling)
+- progressr (for progress tracking in RBM)
+- ComplexHeatmap, circlize (for RBM visualization)
+- viridisLite (for color palettes)
+- knitr, rmarkdown (for vignettes)
 
 ### Optional (for parallel processing)
 - future
