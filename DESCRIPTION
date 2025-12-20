@@ -6,7 +6,9 @@ Authors@R: person("GW", "McElfresh", email = "mcelfreshgw@gmail.com", role = c("
 Description: Tools for subsetting Seurat objects according to metadata columns and 
     fitting zero-inflated negative binomial models to estimate distribution parameters.
     Supports residualization of technical covariates (e.g., cellular saturation) using 
-    generalized additive models (GAM) to improve model fit quality.
+    generalized additive models (GAM) to improve model fit quality. Includes restricted
+    Boltzmann machine (RBM) functionality for connecting features to hidden layers
+    using partial correlations estimated via quasilikelihood.
 License: GPL-3 + file LICENSE
 Encoding: UTF-8
 LazyData: true
@@ -20,7 +22,9 @@ Imports:
     parallel,
     DESeq2,
     mgcv,
-    stats
+    stats,
+    grDevices,
+    grid
 Suggests:
     testthat (>= 3.0.0),
     Seurat,
@@ -28,5 +32,12 @@ Suggests:
     future.apply,
     HDF5Array,
     DelayedArray, 
-    Matrix
+    Matrix,
+    progressr,
+    ComplexHeatmap,
+    circlize,
+    viridisLite,
+    knitr,
+    rmarkdown
 Config/testthat/edition: 3
+VignetteBuilder: knitr
