@@ -2,7 +2,8 @@
 #'
 #' Fits a Restricted Boltzmann Machine (RBM) to connect features from a Seurat object
 #' to a hidden layer populated by metadata factors. The edges are estimated using
-#' partial correlations via quasilikelihood for the specified family.
+#' partial correlations via quasilikelihood for the specified family, then trained
+#' using Contrastive Divergence.
 #'
 #' @param seuratObject A Seurat object or SeuratObject containing single-cell data.
 #' @param visibleFeatures Character vector of feature (gene) names to use as the visible layer.
@@ -15,6 +16,15 @@
 #'   Options: "zinb" (zero-inflated negative binomial, default), "nb", "poisson", "gaussian".
 #' @param minNonZero Minimum number of non-zero observations required for a feature
 #'   to be included (default: 10).
+#' @param cd_k Number of Gibbs sampling steps for Contrastive Divergence (default: 1).
+#'   Use cd_k=1 for CD-1, cd_k=5 for CD-5, etc.
+#' @param learning_rate Learning rate for weight updates (default: 0.01).
+#' @param n_epochs Number of training epochs for Contrastive Divergence (default: 10).
+#' @param batch_size Batch size for mini-batch training (default: 100).
+#' @param persistent Logical indicating whether to use Persistent Contrastive Divergence
+#'   (default: FALSE). If TRUE, maintains chains between batches.
+#' @param momentum Momentum coefficient for weight updates (default: 0.5).
+#' @param weight_decay L2 regularization coefficient (default: 0.0001).
 #' @param progressr Logical indicating whether to use progressr for progress reporting
 #'   (default: TRUE).
 #' @param parallel Logical indicating whether to use parallel processing (default: FALSE).
@@ -24,14 +34,14 @@
 #'
 #' @return An object of class "RBM" containing:
 #'   \itemize{
-#'     \item weights: Matrix of edge weights (partial correlations) from visible to hidden layer
+#'     \item weights_per_layer: List of weight matrices per hidden layer
 #'     \item visible_bias: Bias terms for visible units (features)
-#'     \item hidden_bias: Bias terms for hidden units (metadata factors)
+#'     \item hidden_bias_per_layer: List of bias terms per hidden layer
 #'     \item partial_correlations: Full partial correlation matrix among visible features
 #'     \item visible_features: Names of features in visible layer
-#'     \item hidden_factors: Names of metadata factors in hidden layer
+#'     \item hidden_layers_info: Information about each hidden layer (type, encoding, etc.)
 #'     \item family: Distribution family used for estimation
-#'     \item metadata: Metadata used in fitting
+#'     \item training_error: Reconstruction error per epoch during training
 #'     \item fit_info: Additional information about the fitting process
 #'   }
 #'
@@ -39,8 +49,9 @@
 #' The RBM is fit by:
 #' 1. Extracting expression data for specified features
 #' 2. Computing partial correlations among features using quasilikelihood
-#' 3. Estimating connections from features to hidden metadata factors
-#' 4. Computing bias terms based on feature means and metadata distributions
+#' 3. Initializing connections from features to hidden metadata factors (correlation-based)
+#' 4. Training weights using Contrastive Divergence (CD-k) or Persistent CD
+#' 5. Computing bias terms based on feature means and metadata distributions
 #'
 #' The resulting model can be used for prediction, visualization, and understanding
 #' relationships between gene expression and cell metadata.
@@ -48,24 +59,30 @@
 #' @export
 #' @examples
 #' \dontrun{
-#' # Fit RBM with cell type as hidden layer
+#' # Fit RBM with cell type as hidden layer, using CD-1
 #' rbm <- FitRBM(
 #'   seuratObject = pbmc,
 #'   visibleFeatures = c("CD3D", "CD8A", "CD4", "CD19"),
 #'   hiddenFactors = "CellType",
 #'   family = "zinb",
+#'   cd_k = 1,
+#'   n_epochs = 10,
 #'   parallel = TRUE
 #' )
 #'
-#' # Fit RBM with multiple metadata factors
+#' # Fit RBM with multiple metadata factors using Persistent CD
 #' rbm <- FitRBM(
 #'   seuratObject = pbmc,
 #'   hiddenFactors = c("CellType", "Treatment", "Batch"),
-#'   family = "zinb"
+#'   family = "zinb",
+#'   cd_k = 5,
+#'   persistent = TRUE,
+#'   n_epochs = 20
 #' )
 #'
-#' # Access the weights
-#' print(rbm$weights)
+#' # Access the weights and training error
+#' print(rbm$weights_per_layer)
+#' plot(rbm$training_error)
 #' }
 FitRBM <- function(seuratObject,
                    visibleFeatures = NULL,
@@ -74,6 +91,13 @@ FitRBM <- function(seuratObject,
                    layer = "counts",
                    family = "zinb",
                    minNonZero = 10,
+                   cd_k = 1,
+                   learning_rate = 0.01,
+                   n_epochs = 10,
+                   batch_size = 100,
+                   persistent = FALSE,
+                   momentum = 0.5,
+                   weight_decay = 0.0001,
                    progressr = TRUE,
                    parallel = FALSE,
                    numWorkers = NULL,
@@ -457,6 +481,48 @@ FitRBM <- function(seuratObject,
   }
 
   # ============================================================================
+  # TRAIN RBM WITH CONTRASTIVE DIVERGENCE
+  # ============================================================================
+  
+  if (verbose) {
+    message(sprintf("\nTraining RBM with Contrastive Divergence (CD-%d)...", cd_k))
+    if (persistent) {
+      message("  Using Persistent Contrastive Divergence")
+    }
+    message(sprintf("  Learning rate: %.4f, Epochs: %d, Batch size: %d", 
+                   learning_rate, n_epochs, batch_size))
+  }
+  
+  # Train the RBM
+  training_result <- .train_rbm_cd(
+    visible_data = expr_valid,
+    hidden_layers_info = hidden_layers_info,
+    hidden_layers_encoded = hidden_layers_encoded,
+    weights_per_layer = weights_per_layer,
+    visible_bias = visible_bias,
+    hidden_bias_per_layer = hidden_bias_per_layer,
+    cd_k = cd_k,
+    learning_rate = learning_rate,
+    n_epochs = n_epochs,
+    batch_size = batch_size,
+    persistent = persistent,
+    momentum = momentum,
+    weight_decay = weight_decay,
+    verbose = verbose,
+    progressr = progressr
+  )
+  
+  # Update weights and biases from training
+  weights_per_layer <- training_result$weights_per_layer
+  visible_bias <- training_result$visible_bias
+  hidden_bias_per_layer <- training_result$hidden_bias_per_layer
+  training_error <- training_result$training_error
+  
+  if (verbose) {
+    message(sprintf("  Final reconstruction error: %.6f", training_error[length(training_error)]))
+  }
+
+  # ============================================================================
   # PREPARE OUTPUT - MULTI-LAYER RBM STRUCTURE
   # ============================================================================
   
@@ -501,6 +567,7 @@ FitRBM <- function(seuratObject,
       hidden_layers_encoded = hidden_layers_encoded,
       family = family,
       metadata = metadata_df,
+      training_error = training_error,
       fit_info = fit_info
     ),
     class = "RBM"
@@ -545,6 +612,12 @@ print.RBM <- function(x, ...) {
   cat(sprintf("\nFamily:         %s\n", x$family))
   cat(sprintf("Observations:   %d cells\n", x$fit_info$n_cells))
   cat(sprintf("Valid feature pairs: %d\n", x$fit_info$n_pairs))
+  
+  # Training information
+  if (!is.null(x$training_error)) {
+    cat(sprintf("\nTraining epochs: %d\n", length(x$training_error)))
+    cat(sprintf("Final reconstruction error: %.6f\n", x$training_error[length(x$training_error)]))
+  }
 
   if (length(x$fit_info$excluded_features) > 0) {
     cat(sprintf("\nExcluded features: %d total\n", length(x$fit_info$excluded_features)))
