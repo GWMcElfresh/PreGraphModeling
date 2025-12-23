@@ -78,23 +78,23 @@ FitRBM <- function(seuratObject,
                    parallel = FALSE,
                    numWorkers = NULL,
                    verbose = TRUE) {
-  
+
   # ============================================================================
   # INPUT VALIDATION
   # ============================================================================
-  
+
   if (!inherits(seuratObject, "Seurat") && !inherits(seuratObject, "SeuratObject")) {
     stop("seuratObject must be a Seurat or SeuratObject")
   }
-  
+
   if (missing(hiddenFactors) || is.null(hiddenFactors)) {
     stop("hiddenFactors must be specified (metadata column names)")
   }
-  
+
   if (!is.character(hiddenFactors)) {
     stop("hiddenFactors must be a character vector of metadata column names")
   }
-  
+
   # Check that metadata columns exist
   metadata_obj <- seuratObject@meta.data
   missing_factors <- setdiff(hiddenFactors, colnames(metadata_obj))
@@ -102,20 +102,20 @@ FitRBM <- function(seuratObject,
     stop(sprintf("Metadata columns not found: %s",
                 paste(missing_factors, collapse = ", ")))
   }
-  
+
   if (verbose) {
     message("Fitting Restricted Boltzmann Machine...")
     message(sprintf("  Hidden factors: %s", paste(hiddenFactors, collapse = ", ")))
   }
-  
+
   # ============================================================================
   # EXTRACT EXPRESSION DATA
   # ============================================================================
-  
+
   if (verbose) {
     message("Extracting expression data...")
   }
-  
+
   # Get expression matrix
   if (inherits(seuratObject, "Seurat")) {
     # For Seurat v5+ with layers
@@ -131,7 +131,7 @@ FitRBM <- function(seuratObject,
         expr_matrix <<- SeuratObject::GetAssayData(
           object = seuratObject,
           assay = assay,
-          slot = layer
+          layer = layer
         )
       })
     } else {
@@ -142,15 +142,15 @@ FitRBM <- function(seuratObject,
     expr_matrix <- SeuratObject::GetAssayData(
       object = seuratObject,
       assay = assay,
-      slot = layer
+      layer = layer
     )
   }
-  
+
   # Convert to matrix if needed
   if (inherits(expr_matrix, "Matrix")) {
     expr_matrix <- as.matrix(expr_matrix)
   }
-  
+
   # Filter features if specified
   if (!is.null(visibleFeatures)) {
     if (!is.character(visibleFeatures)) {
@@ -167,18 +167,18 @@ FitRBM <- function(seuratObject,
     }
     expr_matrix <- expr_matrix[visibleFeatures, , drop = FALSE]
   }
-  
+
   if (verbose) {
     message(sprintf("  Expression matrix: %d features x %d cells",
                    nrow(expr_matrix), ncol(expr_matrix)))
   }
-  
+
   # ============================================================================
   # EXTRACT METADATA
   # ============================================================================
-  
+
   metadata_df <- metadata_obj[, hiddenFactors, drop = FALSE]
-  
+
   # Convert factors to numeric for correlation computation
   metadata_numeric <- as.data.frame(lapply(metadata_df, function(col) {
     if (is.factor(col) || is.character(col)) {
@@ -188,19 +188,19 @@ FitRBM <- function(seuratObject,
     }
   }))
   colnames(metadata_numeric) <- hiddenFactors
-  
+
   if (verbose) {
     message(sprintf("  Metadata: %d factors", length(hiddenFactors)))
   }
-  
+
   # ============================================================================
   # COMPUTE PARTIAL CORRELATIONS AMONG VISIBLE FEATURES
   # ============================================================================
-  
+
   if (verbose) {
     message("Computing partial correlations among visible features...")
   }
-  
+
   pcor_result <- EstimatePartialCorrelations(
     expressionMatrix = expr_matrix,
     metadata = NULL,  # Don't include metadata in feature-feature correlations
@@ -211,25 +211,25 @@ FitRBM <- function(seuratObject,
     numWorkers = numWorkers,
     verbose = verbose
   )
-  
+
   # Get valid features (those that passed filtering)
   valid_features <- pcor_result$features
-  
+
   # ============================================================================
   # COMPUTE FEATURE-METADATA CONNECTIONS (WEIGHTS)
   # ============================================================================
-  
+
   if (verbose) {
     message("Computing connections from features to hidden factors...")
   }
-  
+
   # Extract valid features from expression matrix
   expr_valid <- expr_matrix[valid_features, , drop = FALSE]
-  
+
   # Compute feature-metadata correlations as initial weights
   weights_matrix <- matrix(0, nrow = length(valid_features), ncol = length(hiddenFactors),
                           dimnames = list(valid_features, hiddenFactors))
-  
+
   # Setup progress tracking
   if (progressr && requireNamespace("progressr", quietly = TRUE)) {
     progressr::handlers(global = TRUE)
@@ -237,45 +237,45 @@ FitRBM <- function(seuratObject,
   } else {
     p <- NULL
   }
-  
+
   for (i in seq_along(valid_features)) {
     feature_name <- valid_features[i]
     feature_expr <- as.numeric(expr_valid[i, ])
-    
+
     for (j in seq_along(hiddenFactors)) {
       factor_name <- hiddenFactors[j]
       factor_values <- metadata_numeric[[factor_name]]
-      
+
       # Compute correlation (edge weight)
       # Use Spearman for robustness to non-linearity
       weights_matrix[i, j] <- cor(feature_expr, factor_values,
                                   method = "spearman",
                                   use = "pairwise.complete.obs")
     }
-    
+
     if (!is.null(p)) p()
   }
-  
+
   # ============================================================================
   # COMPUTE BIAS TERMS
   # ============================================================================
-  
+
   if (verbose) {
     message("Computing bias terms...")
   }
-  
+
   # Visible bias: mean expression for each feature
   visible_bias <- rowMeans(expr_valid)
   names(visible_bias) <- valid_features
-  
+
   # Hidden bias: mean value for each metadata factor
   hidden_bias <- colMeans(metadata_numeric)
   names(hidden_bias) <- hiddenFactors
-  
+
   # ============================================================================
   # PREPARE OUTPUT
   # ============================================================================
-  
+
   fit_info <- list(
     n_features = length(valid_features),
     n_hidden = length(hiddenFactors),
@@ -285,7 +285,7 @@ FitRBM <- function(seuratObject,
     n_pairs = pcor_result$n_pairs,
     excluded_features = pcor_result$excluded_features
   )
-  
+
   rbm <- structure(
     list(
       weights = weights_matrix,
@@ -300,14 +300,14 @@ FitRBM <- function(seuratObject,
     ),
     class = "RBM"
   )
-  
+
   if (verbose) {
     message("RBM fitting complete!")
     message(sprintf("  Visible layer: %d features", fit_info$n_features))
     message(sprintf("  Hidden layer: %d factors", fit_info$n_hidden))
     message(sprintf("  Total connections: %d", fit_info$n_features * fit_info$n_hidden))
   }
-  
+
   return(rbm)
 }
 
@@ -327,12 +327,12 @@ print.RBM <- function(x, ...) {
   cat(sprintf("Family:         %s\n", x$family))
   cat(sprintf("Observations:   %d cells\n", x$fit_info$n_cells))
   cat(sprintf("Valid feature pairs: %d\n", x$fit_info$n_pairs))
-  
+
   if (length(x$fit_info$excluded_features) > 0) {
     cat(sprintf("\nExcluded features: %d (< %d non-zero observations)\n",
                 length(x$fit_info$excluded_features), x$fit_info$minNonZero))
   }
-  
+
   invisible(x)
 }
 
@@ -344,9 +344,9 @@ print.RBM <- function(x, ...) {
 summary.RBM <- function(object, ...) {
   cat("Restricted Boltzmann Machine Summary\n")
   cat("====================================\n\n")
-  
+
   print(object)
-  
+
   cat("\nWeight statistics:\n")
   cat(sprintf("  Min:    %.4f\n", min(object$weights, na.rm = TRUE)))
   cat(sprintf("  Q1:     %.4f\n", quantile(object$weights, 0.25, na.rm = TRUE)))
@@ -354,12 +354,12 @@ summary.RBM <- function(object, ...) {
   cat(sprintf("  Mean:   %.4f\n", mean(object$weights, na.rm = TRUE)))
   cat(sprintf("  Q3:     %.4f\n", quantile(object$weights, 0.75, na.rm = TRUE)))
   cat(sprintf("  Max:    %.4f\n", max(object$weights, na.rm = TRUE)))
-  
+
   cat("\nPartial correlation statistics:\n")
   # Get upper triangle (exclude diagonal)
   pcor_upper <- object$partial_correlations[upper.tri(object$partial_correlations)]
   pcor_valid <- pcor_upper[!is.na(pcor_upper)]
-  
+
   if (length(pcor_valid) > 0) {
     cat(sprintf("  Min:    %.4f\n", min(pcor_valid)))
     cat(sprintf("  Q1:     %.4f\n", quantile(pcor_valid, 0.25)))
@@ -370,6 +370,6 @@ summary.RBM <- function(object, ...) {
   } else {
     cat("  No valid partial correlations computed\n")
   }
-  
+
   invisible(object)
 }
