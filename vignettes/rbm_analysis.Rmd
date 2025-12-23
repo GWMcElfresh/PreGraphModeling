@@ -216,11 +216,8 @@ new_expr <- GetAssayData(pbmc_new, assay = "RNA", slot = "counts")
 # Predict hidden layer activations
 predictions <- predict(rbm, newdata = new_expr, type = "activation")
 
-# Get probability-transformed predictions
-probs <- predict(rbm, newdata = new_expr, type = "probability")
-
-# Get discrete labels
-labels <- predict(rbm, newdata = new_expr, type = "label")
+# The predictions are continuous activation values for each hidden factor
+head(predictions)
 ```
 
 ### 5. Reconstruct Expression

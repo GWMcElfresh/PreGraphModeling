@@ -160,8 +160,13 @@ test_that("predict.RBM validates input correctly", {
   new_expr <- matrix(rnorm(50), nrow = 10, ncol = 5,
                     dimnames = list(paste0("Gene", 1:10), paste0("Cell", 1:5)))
   expect_error(
-    predict(rbm, newdata = new_expr, type = "invalid"),
-    "type must be one of"
+    predict(rbm, newdata = new_expr, type = "probability"),
+    "type must be 'activation'"
+  )
+  
+  expect_error(
+    predict(rbm, newdata = new_expr, type = "label"),
+    "type must be 'activation'"
   )
   
   # Test valid prediction

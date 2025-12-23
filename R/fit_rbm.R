@@ -214,6 +214,46 @@ FitRBM <- function(seuratObject,
 
   # Get valid features (those that passed filtering)
   valid_features <- pcor_result$features
+  
+  # ============================================================================
+  # PRUNE FEATURES WITH NA/NaN PARTIAL CORRELATIONS
+  # ============================================================================
+  
+  # Check for features with NA/NaN in their partial correlation row/column
+  pcor_matrix <- pcor_result$partial_cor[valid_features, valid_features, drop = FALSE]
+  
+  # Identify features with any NA/NaN in their correlations
+  na_per_feature <- rowSums(is.na(pcor_matrix) | is.nan(pcor_matrix))
+  features_with_na <- valid_features[na_per_feature > 0]
+  
+  if (length(features_with_na) > 0) {
+    if (verbose) {
+      message(sprintf("  Pruning %d features with NA/NaN partial correlations:", 
+                     length(features_with_na)))
+      if (length(features_with_na) <= 10) {
+        message(sprintf("    %s", paste(features_with_na, collapse = ", ")))
+      } else {
+        message(sprintf("    %s ... (and %d more)", 
+                       paste(head(features_with_na, 10), collapse = ", "),
+                       length(features_with_na) - 10))
+      }
+    }
+    
+    # Remove features with NA/NaN from valid_features
+    valid_features <- valid_features[na_per_feature == 0]
+    
+    # Update partial correlation matrix
+    pcor_matrix <- pcor_result$partial_cor[valid_features, valid_features, drop = FALSE]
+    
+    if (length(valid_features) == 0) {
+      stop("No valid features remain after pruning NA/NaN partial correlations")
+    }
+    
+    if (verbose) {
+      message(sprintf("  Retained %d features with valid partial correlations", 
+                     length(valid_features)))
+    }
+  }
 
   # ============================================================================
   # COMPUTE FEATURE-METADATA CONNECTIONS (WEIGHTS)
@@ -237,6 +277,9 @@ FitRBM <- function(seuratObject,
   } else {
     p <- NULL
   }
+  
+  # Track features with NA weights
+  features_with_na_weights <- character(0)
 
   for (i in seq_along(valid_features)) {
     feature_name <- valid_features[i]
@@ -248,12 +291,53 @@ FitRBM <- function(seuratObject,
 
       # Compute correlation (edge weight)
       # Use Spearman for robustness to non-linearity
-      weights_matrix[i, j] <- cor(feature_expr, factor_values,
-                                  method = "spearman",
-                                  use = "pairwise.complete.obs")
+      weight_val <- cor(feature_expr, factor_values,
+                       method = "spearman",
+                       use = "pairwise.complete.obs")
+      
+      weights_matrix[i, j] <- weight_val
+      
+      # Check for NA/NaN weights
+      if (is.na(weight_val) || is.nan(weight_val)) {
+        if (!(feature_name %in% features_with_na_weights)) {
+          features_with_na_weights <- c(features_with_na_weights, feature_name)
+        }
+      }
     }
 
     if (!is.null(p)) p()
+  }
+  
+  # Prune features with NA/NaN weights
+  if (length(features_with_na_weights) > 0) {
+    if (verbose) {
+      message(sprintf("  Pruning %d features with NA/NaN weights:", 
+                     length(features_with_na_weights)))
+      if (length(features_with_na_weights) <= 10) {
+        message(sprintf("    %s", paste(features_with_na_weights, collapse = ", ")))
+      } else {
+        message(sprintf("    %s ... (and %d more)", 
+                       paste(head(features_with_na_weights, 10), collapse = ", "),
+                       length(features_with_na_weights) - 10))
+      }
+    }
+    
+    # Remove features with NA/NaN weights
+    features_to_keep <- setdiff(valid_features, features_with_na_weights)
+    
+    if (length(features_to_keep) == 0) {
+      stop("No valid features remain after pruning NA/NaN weights")
+    }
+    
+    valid_features <- features_to_keep
+    expr_valid <- expr_valid[valid_features, , drop = FALSE]
+    weights_matrix <- weights_matrix[valid_features, , drop = FALSE]
+    pcor_matrix <- pcor_matrix[valid_features, valid_features, drop = FALSE]
+    
+    if (verbose) {
+      message(sprintf("  Final feature count: %d features with valid weights", 
+                     length(valid_features)))
+    }
   }
 
   # ============================================================================
@@ -275,6 +359,16 @@ FitRBM <- function(seuratObject,
   # ============================================================================
   # PREPARE OUTPUT
   # ============================================================================
+  
+  # Combine all excluded features
+  all_excluded_features <- unique(c(
+    pcor_result$excluded_features,
+    features_with_na,
+    features_with_na_weights
+  ))
+  
+  # Count valid pairs from the pruned pcor_matrix
+  n_valid_pairs <- sum(!is.na(pcor_matrix) & upper.tri(pcor_matrix))
 
   fit_info <- list(
     n_features = length(valid_features),
@@ -282,8 +376,11 @@ FitRBM <- function(seuratObject,
     n_cells = ncol(expr_matrix),
     family = family,
     minNonZero = minNonZero,
-    n_pairs = pcor_result$n_pairs,
-    excluded_features = pcor_result$excluded_features
+    n_pairs = n_valid_pairs,
+    excluded_features = all_excluded_features,
+    n_excluded_low_counts = length(pcor_result$excluded_features),
+    n_excluded_na_pcor = length(features_with_na),
+    n_excluded_na_weights = length(features_with_na_weights)
   )
 
   rbm <- structure(
@@ -291,7 +388,7 @@ FitRBM <- function(seuratObject,
       weights = weights_matrix,
       visible_bias = visible_bias,
       hidden_bias = hidden_bias,
-      partial_correlations = pcor_result$partial_cor,
+      partial_correlations = pcor_matrix,
       visible_features = valid_features,
       hidden_factors = hiddenFactors,
       family = family,
@@ -329,8 +426,19 @@ print.RBM <- function(x, ...) {
   cat(sprintf("Valid feature pairs: %d\n", x$fit_info$n_pairs))
 
   if (length(x$fit_info$excluded_features) > 0) {
-    cat(sprintf("\nExcluded features: %d (< %d non-zero observations)\n",
-                length(x$fit_info$excluded_features), x$fit_info$minNonZero))
+    cat(sprintf("\nExcluded features: %d total\n", length(x$fit_info$excluded_features)))
+    if (!is.null(x$fit_info$n_excluded_low_counts) && x$fit_info$n_excluded_low_counts > 0) {
+      cat(sprintf("  - %d features: < %d non-zero observations\n",
+                  x$fit_info$n_excluded_low_counts, x$fit_info$minNonZero))
+    }
+    if (!is.null(x$fit_info$n_excluded_na_pcor) && x$fit_info$n_excluded_na_pcor > 0) {
+      cat(sprintf("  - %d features: NA/NaN partial correlations\n",
+                  x$fit_info$n_excluded_na_pcor))
+    }
+    if (!is.null(x$fit_info$n_excluded_na_weights) && x$fit_info$n_excluded_na_weights > 0) {
+      cat(sprintf("  - %d features: NA/NaN weights\n",
+                  x$fit_info$n_excluded_na_weights))
+    }
   }
 
   invisible(x)

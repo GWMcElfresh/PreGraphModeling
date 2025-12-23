@@ -9,15 +9,15 @@
 
 \item{newdata}{A matrix of expression values for visible features.}
 
-\item{type}{Character string specifying the type of prediction. Options: "activation", "probability", "label".}
+\item{type}{Character string specifying the type of prediction. Only "activation" is supported.}
 
 \item{...}{Additional arguments (unused).}
 }
 \value{
-A matrix of predicted hidden layer values.
+A matrix of predicted hidden layer activation values.
 }
 \description{
-Given a fitted RBM and new expression data, predict the hidden layer activations based on the learned weights and biases.
+Given a fitted RBM and new expression data, predict the hidden layer activations based on the learned weights and biases. Only activation predictions are supported as RBM is not a classification model.
 }
 \examples{
 \dontrun{

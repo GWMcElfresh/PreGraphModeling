@@ -268,8 +268,8 @@ draw(heatmap_weights)
 new_expr <- GetAssayData(pbmc_new, assay = "RNA", slot = "counts")
 predictions <- predict(rbm, newdata = new_expr, type = "activation")
 
-# Get probability-transformed predictions
-probs <- predict(rbm, newdata = new_expr, type = "probability")
+# Predictions are continuous activation values for each hidden factor
+head(predictions)
 ```
 
 ### Estimate Partial Correlations Directly

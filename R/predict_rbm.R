@@ -8,23 +8,18 @@
 #'   Rows should be features (matching those in the RBM) and columns are new observations.
 #'   If NULL, uses the training data (default: NULL).
 #' @param type Character string specifying the type of prediction.
-#'   Options: "activation" (hidden unit activations), "probability" (sigmoid-transformed
-#'   activations), "label" (discretized labels for factors) (default: "activation").
+#'   Only "activation" is supported (hidden unit activations) (default: "activation").
 #' @param ... Additional arguments (unused).
 #'
-#' @return A matrix of predicted hidden layer values with rows as observations and
-#'   columns as hidden factors. The exact form depends on the 'type' argument:
-#'   \itemize{
-#'     \item activation: Raw activation values (continuous)
-#'     \item probability: Sigmoid-transformed activations in [0, 1]
-#'     \item label: Discretized labels (for categorical factors)
-#'   }
+#' @return A matrix of predicted hidden layer activation values with rows as observations
+#'   and columns as hidden factors. Values are continuous and represent the activation
+#'   of each hidden unit.
 #'
 #' @details
 #' Predictions are computed using the standard RBM forward pass:
-#' \deqn{h = \sigma(W^T v + b_h)}
+#' \deqn{h = W^T v + b_h}
 #' where v is the visible layer (expression), W is the weight matrix,
-#' b_h is the hidden bias, and σ is an activation function.
+#' and b_h is the hidden bias vector.
 #'
 #' @export
 #' @examples
@@ -34,16 +29,12 @@
 #'
 #' # Predict on new data
 #' predictions <- predict(rbm, newdata = new_expr_matrix)
-#'
-#' # Get probability-transformed predictions
-#' probs <- predict(rbm, newdata = new_expr_matrix, type = "probability")
 #' }
 predict.RBM <- function(object, newdata = NULL, type = "activation", ...) {
   
   # Validate type
-  valid_types <- c("activation", "probability", "label")
-  if (!type %in% valid_types) {
-    stop(sprintf("type must be one of: %s", paste(valid_types, collapse = ", ")))
+  if (type != "activation") {
+    stop("type must be 'activation' (only activation predictions supported for RBM)")
   }
   
   # If no new data, return NULL (training data predictions not stored)
@@ -96,57 +87,19 @@ predict.RBM <- function(object, newdata = NULL, type = "activation", ...) {
   
   activations <- t(expr_data) %*% weights  # observations x hidden_units
   
-  # Add hidden bias
-  hidden_bias_matrix <- matrix(
-    rep(object$hidden_bias, each = ncol(expr_data)),
-    nrow = ncol(expr_data),
-    ncol = length(object$hidden_bias)
-  )
-  activations <- activations + hidden_bias_matrix
+  # Add hidden bias - use simpler approach to avoid dimension issues
+  n_obs <- ncol(expr_data)
+  n_hidden <- length(object$hidden_bias)
+  
+  for (j in seq_len(n_hidden)) {
+    activations[, j] <- activations[, j] + object$hidden_bias[j]
+  }
   
   # Set column names
   colnames(activations) <- object$hidden_factors
   rownames(activations) <- colnames(expr_data)
   
-  # ============================================================================
-  # TRANSFORM BASED ON TYPE
-  # ============================================================================
-  
-  if (type == "activation") {
-    # Return raw activations
-    result <- activations
-    
-  } else if (type == "probability") {
-    # Apply sigmoid transformation to get probabilities
-    result <- 1 / (1 + exp(-activations))
-    
-  } else if (type == "label") {
-    # Discretize into labels
-    # For each factor, assign to the most likely category
-    result <- activations
-    
-    # Normalize each column to probabilities
-    for (j in seq_len(ncol(result))) {
-      # Shift to positive range
-      shifted <- result[, j] - min(result[, j]) + 1
-      # Normalize
-      result[, j] <- shifted / sum(shifted)
-    }
-    
-    # Convert to discrete labels (1, 2, 3, ...)
-    result <- apply(result, 2, function(col) {
-      # Simple discretization: round to nearest integer
-      round(col * (max(col) / min(col[col > 0])))
-    })
-    
-    if (!is.matrix(result)) {
-      result <- as.matrix(result)
-      colnames(result) <- object$hidden_factors
-      rownames(result) <- colnames(expr_data)
-    }
-  }
-  
-  return(result)
+  return(activations)
 }
 
 
