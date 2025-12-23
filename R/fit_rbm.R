@@ -174,23 +174,52 @@ FitRBM <- function(seuratObject,
   }
 
   # ============================================================================
-  # EXTRACT METADATA
+  # EXTRACT AND PROCESS METADATA - MULTI-LAYER ARCHITECTURE
   # ============================================================================
 
-  metadata_df <- metadata_obj[, hiddenFactors, drop = FALSE]
-
-  # Convert factors to numeric for correlation computation
-  metadata_numeric <- as.data.frame(lapply(metadata_df, function(col) {
-    if (is.factor(col) || is.character(col)) {
-      as.numeric(as.factor(col))
-    } else {
-      as.numeric(col)
-    }
-  }))
-  colnames(metadata_numeric) <- hiddenFactors
-
   if (verbose) {
-    message(sprintf("  Metadata: %d factors", length(hiddenFactors)))
+    message("Processing metadata for multi-layer RBM...")
+    message("  Detecting factor types...")
+  }
+
+  metadata_df <- metadata_obj[, hiddenFactors, drop = FALSE]
+  
+  # Detect type for each metadata factor
+  hidden_layers_info <- list()
+  
+  for (factor_name in hiddenFactors) {
+    factor_info <- .detect_factor_type(
+      metadata_df[[factor_name]], 
+      col_name = factor_name,
+      verbose = verbose
+    )
+    
+    hidden_layers_info[[factor_name]] <- factor_info
+  }
+  
+  # Encode metadata factors appropriately
+  if (verbose) {
+    message("  Encoding metadata factors...")
+  }
+  
+  hidden_layers_encoded <- list()
+  hidden_layers_dim <- list()
+  
+  for (factor_name in hiddenFactors) {
+    factor_info <- hidden_layers_info[[factor_name]]
+    encoded <- .encode_factor(
+      metadata_df[[factor_name]],
+      factor_info,
+      col_name = factor_name
+    )
+    
+    hidden_layers_encoded[[factor_name]] <- encoded
+    hidden_layers_dim[[factor_name]] <- ncol(encoded)
+    
+    if (verbose) {
+      message(sprintf("    %s: %d hidden units (%s)", 
+                     factor_name, ncol(encoded), factor_info$type))
+    }
   }
 
   # ============================================================================
@@ -248,56 +277,67 @@ FitRBM <- function(seuratObject,
   }
 
   # ============================================================================
-  # COMPUTE FEATURE-METADATA CONNECTIONS (WEIGHTS)
+  # COMPUTE FEATURE-METADATA CONNECTIONS (WEIGHTS) - ONE MATRIX PER HIDDEN LAYER
   # ============================================================================
 
   if (verbose) {
-    message("Computing connections from features to hidden factors...")
+    message("Computing connections from visible features to hidden layers...")
   }
 
   # Extract valid features from expression matrix
   expr_valid <- expr_matrix[valid_features, , drop = FALSE]
 
-  # Compute feature-metadata correlations as initial weights
-  weights_matrix <- matrix(0, nrow = length(valid_features), ncol = length(hiddenFactors),
-                          dimnames = list(valid_features, hiddenFactors))
+  # Create separate weight matrix for each hidden layer
+  weights_per_layer <- list()
+  features_with_na_weights <- character(0)
 
   # Setup progress tracking
   if (progressr && requireNamespace("progressr", quietly = TRUE)) {
     progressr::handlers(global = TRUE)
-    p <- progressr::progressor(steps = length(valid_features))
+    p <- progressr::progressor(steps = length(valid_features) * length(hiddenFactors))
   } else {
     p <- NULL
   }
-  
-  # Track features with NA weights
-  features_with_na_weights <- character(0)
 
-  for (i in seq_along(valid_features)) {
-    feature_name <- valid_features[i]
-    feature_expr <- as.numeric(expr_valid[i, ])
-
-    for (j in seq_along(hiddenFactors)) {
-      factor_name <- hiddenFactors[j]
-      factor_values <- metadata_numeric[[factor_name]]
-
-      # Compute correlation (edge weight)
-      # Use Spearman for robustness to non-linearity
-      weight_val <- cor(feature_expr, factor_values,
-                       method = "spearman",
-                       use = "pairwise.complete.obs")
+  for (factor_name in hiddenFactors) {
+    factor_info <- hidden_layers_info[[factor_name]]
+    encoded_hidden <- hidden_layers_encoded[[factor_name]]
+    n_hidden_units <- ncol(encoded_hidden)
+    
+    # Initialize weight matrix for this hidden layer
+    weights_matrix <- matrix(0, 
+                            nrow = length(valid_features), 
+                            ncol = n_hidden_units,
+                            dimnames = list(valid_features, colnames(encoded_hidden)))
+    
+    # Compute weights based on correlation with encoded hidden units
+    for (i in seq_along(valid_features)) {
+      feature_name <- valid_features[i]
+      feature_expr <- as.numeric(expr_valid[i, ])
       
-      weights_matrix[i, j] <- weight_val
-      
-      # Check for NA/NaN weights
-      if (is.na(weight_val) || is.nan(weight_val)) {
-        if (!(feature_name %in% features_with_na_weights)) {
-          features_with_na_weights <- c(features_with_na_weights, feature_name)
+      for (j in seq_len(n_hidden_units)) {
+        hidden_values <- encoded_hidden[, j]
+        
+        # Compute correlation (edge weight)
+        # Use Spearman for robustness to non-linearity
+        weight_val <- cor(feature_expr, hidden_values,
+                         method = "spearman",
+                         use = "pairwise.complete.obs")
+        
+        weights_matrix[i, j] <- weight_val
+        
+        # Check for NA/NaN weights
+        if (is.na(weight_val) || is.nan(weight_val)) {
+          if (!(feature_name %in% features_with_na_weights)) {
+            features_with_na_weights <- c(features_with_na_weights, feature_name)
+          }
         }
       }
+      
+      if (!is.null(p)) p()
     }
-
-    if (!is.null(p)) p()
+    
+    weights_per_layer[[factor_name]] <- weights_matrix
   }
   
   # ============================================================================
@@ -326,7 +366,11 @@ FitRBM <- function(seuratObject,
     
     valid_features <- features_to_keep
     expr_valid <- expr_valid[valid_features, , drop = FALSE]
-    weights_matrix <- weights_matrix[valid_features, , drop = FALSE]
+    
+    # Update all weight matrices
+    for (factor_name in hiddenFactors) {
+      weights_per_layer[[factor_name]] <- weights_per_layer[[factor_name]][valid_features, , drop = FALSE]
+    }
   }
   
   # ============================================================================
@@ -363,7 +407,7 @@ FitRBM <- function(seuratObject,
   }
 
   # ============================================================================
-  # COMPUTE BIAS TERMS
+  # COMPUTE BIAS TERMS - ONE SET PER HIDDEN LAYER
   # ============================================================================
 
   if (verbose) {
@@ -374,12 +418,16 @@ FitRBM <- function(seuratObject,
   visible_bias <- rowMeans(expr_valid)
   names(visible_bias) <- valid_features
 
-  # Hidden bias: mean value for each metadata factor
-  hidden_bias <- colMeans(metadata_numeric)
-  names(hidden_bias) <- hiddenFactors
+  # Hidden bias: mean value for each encoded hidden layer
+  hidden_bias_per_layer <- list()
+  
+  for (factor_name in hiddenFactors) {
+    encoded_hidden <- hidden_layers_encoded[[factor_name]]
+    hidden_bias_per_layer[[factor_name]] <- colMeans(encoded_hidden)
+  }
 
   # ============================================================================
-  # PREPARE OUTPUT
+  # PREPARE OUTPUT - MULTI-LAYER RBM STRUCTURE
   # ============================================================================
   
   # Combine all excluded features
@@ -391,10 +439,14 @@ FitRBM <- function(seuratObject,
   
   # Count valid pairs from the pruned pcor_matrix
   n_valid_pairs <- sum(!is.na(pcor_matrix) & upper.tri(pcor_matrix))
+  
+  # Count total hidden units across all layers
+  total_hidden_units <- sum(unlist(hidden_layers_dim))
 
   fit_info <- list(
     n_features = length(valid_features),
-    n_hidden = length(hiddenFactors),
+    n_hidden_layers = length(hiddenFactors),
+    n_hidden_units_total = total_hidden_units,
     n_cells = ncol(expr_matrix),
     family = family,
     minNonZero = minNonZero,
@@ -402,17 +454,21 @@ FitRBM <- function(seuratObject,
     excluded_features = all_excluded_features,
     n_excluded_low_counts = length(pcor_result$excluded_features),
     n_excluded_na_pcor = length(features_with_na_pcor),
-    n_excluded_na_weights = length(features_with_na_weights)
+    n_excluded_na_weights = length(features_with_na_weights),
+    hidden_layers_info = hidden_layers_info,
+    hidden_layers_dim = hidden_layers_dim
   )
 
   rbm <- structure(
     list(
-      weights = weights_matrix,
+      weights_per_layer = weights_per_layer,
       visible_bias = visible_bias,
-      hidden_bias = hidden_bias,
+      hidden_bias_per_layer = hidden_bias_per_layer,
       partial_correlations = pcor_matrix,
       visible_features = valid_features,
       hidden_factors = hiddenFactors,
+      hidden_layers_info = hidden_layers_info,
+      hidden_layers_encoded = hidden_layers_encoded,
       family = family,
       metadata = metadata_df,
       fit_info = fit_info
@@ -423,8 +479,13 @@ FitRBM <- function(seuratObject,
   if (verbose) {
     message("RBM fitting complete!")
     message(sprintf("  Visible layer: %d features", fit_info$n_features))
-    message(sprintf("  Hidden layer: %d factors", fit_info$n_hidden))
-    message(sprintf("  Total connections: %d", fit_info$n_features * fit_info$n_hidden))
+    message(sprintf("  Hidden layers: %d layers with %d total units", 
+                   fit_info$n_hidden_layers, fit_info$n_hidden_units_total))
+    for (factor_name in hiddenFactors) {
+      factor_info <- hidden_layers_info[[factor_name]]
+      n_units <- hidden_layers_dim[[factor_name]]
+      message(sprintf("    - %s: %d units (%s)", factor_name, n_units, factor_info$type))
+    }
   }
 
   return(rbm)
@@ -436,14 +497,22 @@ FitRBM <- function(seuratObject,
 #' @param ... Additional arguments (unused)
 #' @export
 print.RBM <- function(x, ...) {
-  cat("Restricted Boltzmann Machine\n")
-  cat("============================\n\n")
+  cat("Multi-Layer Restricted Boltzmann Machine\n")
+  cat("=========================================\n\n")
   cat(sprintf("Visible layer:  %d features\n", x$fit_info$n_features))
-  cat(sprintf("Hidden layer:   %d factors (%s)\n",
-              x$fit_info$n_hidden,
+  cat(sprintf("Hidden layers:  %d layers (%s)\n",
+              x$fit_info$n_hidden_layers,
               paste(x$hidden_factors, collapse = ", ")))
-  cat(sprintf("Total edges:    %d\n", x$fit_info$n_features * x$fit_info$n_hidden))
-  cat(sprintf("Family:         %s\n", x$family))
+  cat(sprintf("Total hidden units: %d\n", x$fit_info$n_hidden_units_total))
+  
+  cat("\nHidden layer details:\n")
+  for (factor_name in x$hidden_factors) {
+    factor_info <- x$hidden_layers_info[[factor_name]]
+    n_units <- x$fit_info$hidden_layers_dim[[factor_name]]
+    cat(sprintf("  %s: %d units, type=%s\n", factor_name, n_units, factor_info$type))
+  }
+  
+  cat(sprintf("\nFamily:         %s\n", x$family))
   cat(sprintf("Observations:   %d cells\n", x$fit_info$n_cells))
   cat(sprintf("Valid feature pairs: %d\n", x$fit_info$n_pairs))
 
@@ -472,18 +541,22 @@ print.RBM <- function(x, ...) {
 #' @param ... Additional arguments (unused)
 #' @export
 summary.RBM <- function(object, ...) {
-  cat("Restricted Boltzmann Machine Summary\n")
-  cat("====================================\n\n")
+  cat("Multi-Layer Restricted Boltzmann Machine Summary\n")
+  cat("=================================================\n\n")
 
   print(object)
 
-  cat("\nWeight statistics:\n")
-  cat(sprintf("  Min:    %.4f\n", min(object$weights, na.rm = TRUE)))
-  cat(sprintf("  Q1:     %.4f\n", quantile(object$weights, 0.25, na.rm = TRUE)))
-  cat(sprintf("  Median: %.4f\n", median(object$weights, na.rm = TRUE)))
-  cat(sprintf("  Mean:   %.4f\n", mean(object$weights, na.rm = TRUE)))
-  cat(sprintf("  Q3:     %.4f\n", quantile(object$weights, 0.75, na.rm = TRUE)))
-  cat(sprintf("  Max:    %.4f\n", max(object$weights, na.rm = TRUE)))
+  cat("\nWeight statistics per layer:\n")
+  for (factor_name in object$hidden_factors) {
+    weights <- object$weights_per_layer[[factor_name]]
+    cat(sprintf("\n  %s:\n", factor_name))
+    cat(sprintf("    Min:    %.4f\n", min(weights, na.rm = TRUE)))
+    cat(sprintf("    Q1:     %.4f\n", quantile(weights, 0.25, na.rm = TRUE)))
+    cat(sprintf("    Median: %.4f\n", median(weights, na.rm = TRUE)))
+    cat(sprintf("    Mean:   %.4f\n", mean(weights, na.rm = TRUE)))
+    cat(sprintf("    Q3:     %.4f\n", quantile(weights, 0.75, na.rm = TRUE)))
+    cat(sprintf("    Max:    %.4f\n", max(weights, na.rm = TRUE)))
+  }
 
   cat("\nPartial correlation statistics:\n")
   # Get upper triangle (exclude diagonal)
