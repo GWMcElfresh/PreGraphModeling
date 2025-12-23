@@ -216,7 +216,7 @@ FitRBM <- function(seuratObject,
   valid_features <- pcor_result$features
   
   # ============================================================================
-  # PRUNE FEATURES WITH NA/NaN PARTIAL CORRELATIONS
+  # PRUNE FEATURES WITH NA/NaN PARTIAL CORRELATIONS AND RECOMPUTE
   # ============================================================================
   
   # Check for features with NA/NaN in their partial correlation row/column
@@ -224,35 +224,74 @@ FitRBM <- function(seuratObject,
   
   # Identify features with any NA/NaN in their correlations
   na_per_feature <- rowSums(is.na(pcor_matrix) | is.nan(pcor_matrix))
-  features_with_na <- valid_features[na_per_feature > 0]
+  features_with_na_pcor <- valid_features[na_per_feature > 0]
   
-  if (length(features_with_na) > 0) {
+  if (length(features_with_na_pcor) > 0) {
     if (verbose) {
       message(sprintf("  Pruning %d features with NA/NaN partial correlations:", 
-                     length(features_with_na)))
-      if (length(features_with_na) <= 10) {
-        message(sprintf("    %s", paste(features_with_na, collapse = ", ")))
+                     length(features_with_na_pcor)))
+      if (length(features_with_na_pcor) <= 10) {
+        message(sprintf("    %s", paste(features_with_na_pcor, collapse = ", ")))
       } else {
         message(sprintf("    %s ... (and %d more)", 
-                       paste(head(features_with_na, 10), collapse = ", "),
-                       length(features_with_na) - 10))
+                       paste(head(features_with_na_pcor, 10), collapse = ", "),
+                       length(features_with_na_pcor) - 10))
       }
     }
     
     # Remove features with NA/NaN from valid_features
     valid_features <- valid_features[na_per_feature == 0]
     
-    # Update partial correlation matrix
-    pcor_matrix <- pcor_result$partial_cor[valid_features, valid_features, drop = FALSE]
-    
     if (length(valid_features) == 0) {
       stop("No valid features remain after pruning NA/NaN partial correlations")
     }
     
     if (verbose) {
-      message(sprintf("  Retained %d features with valid partial correlations", 
+      message(sprintf("  Recomputing partial correlations with %d retained features...", 
                      length(valid_features)))
     }
+    
+    # IMPORTANT: Recompute partial correlations with only the retained features
+    # This is necessary because partial correlations condition on ALL features,
+    # so removing features changes the definition of the quasilikelihood
+    pcor_result_recomputed <- EstimatePartialCorrelations(
+      expressionMatrix = expr_matrix[valid_features, , drop = FALSE],
+      metadata = NULL,
+      family = family,
+      minNonZero = minNonZero,
+      progressr = FALSE,  # Disable progress for recomputation
+      parallel = FALSE,   # Don't parallelize recomputation
+      verbose = FALSE     # Suppress verbose output for recomputation
+    )
+    
+    # Check if recomputation produced more NAs (shouldn't happen, but safety check)
+    pcor_matrix_new <- pcor_result_recomputed$partial_cor[valid_features, valid_features, drop = FALSE]
+    na_per_feature_new <- rowSums(is.na(pcor_matrix_new) | is.nan(pcor_matrix_new))
+    
+    if (any(na_per_feature_new > 0)) {
+      # If recomputation still has NAs, warn and remove those too
+      features_still_na <- valid_features[na_per_feature_new > 0]
+      if (verbose) {
+        message(sprintf("  Warning: %d features still have NA/NaN after recomputation, removing them",
+                       length(features_still_na)))
+      }
+      valid_features <- valid_features[na_per_feature_new == 0]
+      
+      if (length(valid_features) == 0) {
+        stop("No valid features remain after recomputing partial correlations")
+      }
+    }
+    
+    # Use the recomputed partial correlations
+    pcor_matrix <- pcor_result_recomputed$partial_cor[valid_features, valid_features, drop = FALSE]
+    
+    if (verbose) {
+      message(sprintf("  Final feature count: %d features with valid partial correlations", 
+                     length(valid_features)))
+    }
+  } else {
+    # No NA/NaN features, use original partial correlation matrix
+    pcor_matrix <- pcor_result$partial_cor[valid_features, valid_features, drop = FALSE]
   }
 
   # ============================================================================
@@ -332,7 +371,25 @@ FitRBM <- function(seuratObject,
     valid_features <- features_to_keep
     expr_valid <- expr_valid[valid_features, , drop = FALSE]
     weights_matrix <- weights_matrix[valid_features, , drop = FALSE]
-    pcor_matrix <- pcor_matrix[valid_features, valid_features, drop = FALSE]
+    
+    # IMPORTANT: Recompute partial correlations after removing features with NA weights
+    # This is necessary because partial correlations condition on ALL features
+    if (verbose) {
+      message(sprintf("  Recomputing partial correlations after weight pruning with %d features...", 
+                     length(valid_features)))
+    }
+    
+    pcor_result_final <- EstimatePartialCorrelations(
+      expressionMatrix = expr_matrix[valid_features, , drop = FALSE],
+      metadata = NULL,
+      family = family,
+      minNonZero = minNonZero,
+      progressr = FALSE,
+      parallel = FALSE,
+      verbose = FALSE
+    )
+    
+    pcor_matrix <- pcor_result_final$partial_cor[valid_features, valid_features, drop = FALSE]
     
     if (verbose) {
       message(sprintf("  Final feature count: %d features with valid weights", 
@@ -363,7 +420,7 @@ FitRBM <- function(seuratObject,
   # Combine all excluded features
   all_excluded_features <- unique(c(
     pcor_result$excluded_features,
-    features_with_na,
+    features_with_na_pcor,
     features_with_na_weights
   ))
   
@@ -379,7 +436,7 @@ FitRBM <- function(seuratObject,
     n_pairs = n_valid_pairs,
     excluded_features = all_excluded_features,
     n_excluded_low_counts = length(pcor_result$excluded_features),
-    n_excluded_na_pcor = length(features_with_na),
+    n_excluded_na_pcor = length(features_with_na_pcor),
     n_excluded_na_weights = length(features_with_na_weights)
   )
 
