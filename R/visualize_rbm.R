@@ -274,8 +274,27 @@ PlotRBMWeights <- function(rbmObject,
     stop("Package 'ComplexHeatmap' is required. Install with: BiocManager::install('ComplexHeatmap')")
   }
   
-  # Extract weight matrix
-  weight_matrix <- rbmObject$weights
+  # Determine which factors to plot
+  factors_to_plot <- if (is.null(factors)) rbmObject$hidden_factors else factors
+  
+  # Validate factors
+  missing_factors <- setdiff(factors_to_plot, rbmObject$hidden_factors)
+  if (length(missing_factors) > 0) {
+    stop(sprintf("Factors not found in RBM: %s", paste(missing_factors, collapse = ", ")))
+  }
+  
+  # ============================================================================
+  # COMBINE WEIGHT MATRICES FROM MULTIPLE LAYERS
+  # ============================================================================
+  
+  # Combine weight matrices for selected factors
+  weight_list <- list()
+  for (factor_name in factors_to_plot) {
+    weight_list[[factor_name]] <- rbmObject$weights_per_layer[[factor_name]]
+  }
+  
+  # Concatenate horizontally
+  weight_matrix <- do.call(cbind, weight_list)
   
   # Filter features if specified
   if (!is.null(features)) {
@@ -284,15 +303,6 @@ PlotRBMWeights <- function(rbmObject,
       stop("None of the specified features are available in the RBM")
     }
     weight_matrix <- weight_matrix[available, , drop = FALSE]
-  }
-  
-  # Filter factors if specified
-  if (!is.null(factors)) {
-    available <- intersect(factors, colnames(weight_matrix))
-    if (length(available) == 0) {
-      stop("None of the specified factors are available in the RBM")
-    }
-    weight_matrix <- weight_matrix[, available, drop = FALSE]
   }
   
   # ============================================================================
@@ -320,6 +330,35 @@ PlotRBMWeights <- function(rbmObject,
   }
   
   # ============================================================================
+  # CREATE COLUMN ANNOTATION FOR LAYER GROUPING
+  # ============================================================================
+  
+  # Create factor annotations to show which columns belong to which layer
+  layer_annotations <- character(ncol(weight_matrix))
+  layer_colors <- character(ncol(weight_matrix))
+  
+  col_idx <- 1
+  color_palette_layers <- c("#E41A1C", "#377EB8", "#4DAF4A", "#984EA3", "#FF7F00", "#FFFF33")
+  
+  for (i in seq_along(factors_to_plot)) {
+    factor_name <- factors_to_plot[i]
+    n_cols <- ncol(rbmObject$weights_per_layer[[factor_name]])
+    layer_annotations[col_idx:(col_idx + n_cols - 1)] <- factor_name
+    layer_colors[col_idx:(col_idx + n_cols - 1)] <- color_palette_layers[(i - 1) %% length(color_palette_layers) + 1]
+    col_idx <- col_idx + n_cols
+  }
+  
+  # Create column annotation
+  column_ha <- ComplexHeatmap::HeatmapAnnotation(
+    Layer = layer_annotations,
+    col = list(Layer = setNames(unique(layer_colors), unique(layer_annotations))),
+    show_legend = TRUE,
+    annotation_legend_param = list(
+      Layer = list(title = "Hidden Layer", title_gp = grid::gpar(fontsize = 10, fontface = "bold"))
+    )
+  )
+  
+  # ============================================================================
   # CREATE HEATMAP
   # ============================================================================
   
@@ -338,6 +377,7 @@ PlotRBMWeights <- function(rbmObject,
     show_column_names = show_column_names,
     column_title = title,
     row_title = "Features (Visible Layer)",
+    top_annotation = column_ha,
     column_title_gp = grid::gpar(fontsize = 14, fontface = "bold"),
     row_title_gp = grid::gpar(fontsize = 12),
     heatmap_legend_param = list(
