@@ -1,4 +1,129 @@
-#' Plot RBM Partial Correlations as Heatmap
+# Internal helpers ------------------------------------------------------------
+
+.assert_positive_integer <- function(x, name, allow_null = FALSE) {
+  if (allow_null && is.null(x)) {
+    return(invisible(TRUE))
+  }
+  if (length(x) != 1 || is.na(x) || !is.numeric(x) || x <= 0) {
+    stop(sprintf("%s must be a single positive number", name))
+  }
+  invisible(TRUE)
+}
+
+.subset_matrix_to_features <- function(mat, features) {
+  available <- intersect(features, rownames(mat))
+  missing <- setdiff(features, rownames(mat))
+
+  if (length(missing) > 0) {
+    warning(sprintf(
+      "Features not found: %s",
+      paste(missing, collapse = ", ")
+    ))
+  }
+  if (length(available) == 0) {
+    stop("None of the specified features are available")
+  }
+  mat[available, available, drop = FALSE]
+}
+
+.select_features_from_partial_cor <- function(pcor_matrix,
+                                              nEdges = 50,
+                                              nFeatures = NULL) {
+  .assert_positive_integer(nEdges, "nEdges")
+  .assert_positive_integer(nFeatures, "nFeatures", allow_null = TRUE)
+
+  if (is.null(rownames(pcor_matrix))) {
+    stop("pcor_matrix must have row names")
+  }
+  if (nrow(pcor_matrix) < 2) {
+    return(rownames(pcor_matrix))
+  }
+
+  ut <- upper.tri(pcor_matrix, diag = FALSE)
+  valid <- ut & !is.na(pcor_matrix)
+  idx <- which(valid)
+  if (length(idx) == 0) {
+    return(rownames(pcor_matrix))
+  }
+
+  vals <- abs(pcor_matrix[idx])
+  ord <- order(vals, decreasing = TRUE)
+  top_n <- min(as.integer(nEdges), length(ord))
+  top_idx <- idx[ord[seq_len(top_n)]]
+
+  rc <- arrayInd(top_idx, dim(pcor_matrix))
+  genes <- rownames(pcor_matrix)
+  selected <- unique(c(genes[rc[, 1]], genes[rc[, 2]]))
+
+  if (!is.null(nFeatures) && length(selected) > nFeatures) {
+    edge_weights <- abs(pcor_matrix[top_idx])
+    node_score <- stats::setNames(rep(0, length(selected)), selected)
+    for (i in seq_len(nrow(rc))) {
+      g1 <- genes[rc[i, 1]]
+      g2 <- genes[rc[i, 2]]
+      w <- edge_weights[i]
+      if (!is.na(w)) {
+        if (g1 %in% selected) node_score[g1] <- node_score[g1] + w
+        if (g2 %in% selected) node_score[g2] <- node_score[g2] + w
+      }
+    }
+    selected <- names(sort(node_score, decreasing = TRUE))[seq_len(as.integer(nFeatures))]
+  }
+
+  selected
+}
+
+.allocate_counts_evenly <- function(nTotal, nGroups) {
+  if (nGroups <= 0) return(integer(0))
+  nTotal <- as.integer(nTotal)
+  base <- nTotal %/% nGroups
+  rem <- nTotal - base * nGroups
+  base + (seq_len(nGroups) <= rem)
+}
+
+.select_features_from_weights_per_layer <- function(weights_per_layer,
+                                                    factors_to_plot,
+                                                    nFeatures = 50) {
+  .assert_positive_integer(nFeatures, "nFeatures")
+
+  if (length(factors_to_plot) == 0) {
+    stop("No factors provided")
+  }
+  if (is.null(weights_per_layer) || !is.list(weights_per_layer)) {
+    stop("weights_per_layer must be a named list of weight matrices")
+  }
+
+  counts <- .allocate_counts_evenly(nFeatures, length(factors_to_plot))
+  selected <- character(0)
+
+  for (i in seq_along(factors_to_plot)) {
+    factor_name <- factors_to_plot[i]
+    w <- weights_per_layer[[factor_name]]
+    if (is.null(w)) {
+      next
+    }
+    if (is.null(rownames(w))) {
+      stop(sprintf("weights_per_layer[['%s']] must have row names (feature names)", factor_name))
+    }
+    k <- counts[i]
+    if (k <= 0) next
+
+    gene_score <- apply(abs(w), 1, max, na.rm = TRUE)
+    gene_score[is.na(gene_score)] <- 0
+    ord <- order(gene_score, decreasing = TRUE)
+    topk <- rownames(w)[ord[seq_len(min(k, length(ord)))]]
+    selected <- c(selected, topk)
+  }
+
+  selected <- unique(selected)
+  if (length(selected) > nFeatures) {
+    selected <- selected[seq_len(as.integer(nFeatures))]
+  }
+  selected
+}
+
+
+#' Plot Partial Correlations as Heatmap
 #'
 #' Creates a heatmap visualization of the partial correlation matrix from an RBM
 #' using ComplexHeatmap. The heatmap shows the relationships between features
@@ -6,7 +131,11 @@
 #'
 #' @param rbmObject An RBM object fitted using FitRBM().
 #' @param features Optional character vector of specific features to plot.
-#'   If NULL, plots all features (default: NULL).
+#'   If NULL, selects features from the strongest partial correlations.
+#' @param nEdges Integer. If features is NULL, select features from the top nEdges
+#'   absolute partial correlations (default: 50).
+#' @param nFeatures Optional integer. If provided and features is NULL, cap the
+#'   number of selected features (vertices) to this value (default: NULL).
 #' @param cluster_rows Logical indicating whether to cluster rows (default: TRUE).
 #' @param cluster_columns Logical indicating whether to cluster columns (default: TRUE).
 #' @param show_row_names Logical indicating whether to show row names (default: TRUE).
@@ -48,16 +177,18 @@
 #' # Use different color palette
 #' heatmap_plot <- PlotRBMHeatmap(rbm, color_palette = "viridis")
 #' }
-PlotRBMHeatmap <- function(rbmObject,
-                          features = NULL,
-                          cluster_rows = TRUE,
-                          cluster_columns = TRUE,
-                          show_row_names = TRUE,
-                          show_column_names = TRUE,
-                          color_palette = "RdBu",
-                          title = "RBM Partial Correlations",
-                          name = "Partial\nCorrelation",
-                          ...) {
+PlotPartialCorrelationHeatmap <- function(rbmObject,
+                                         features = NULL,
+                                         nEdges = 50,
+                                         nFeatures = NULL,
+                                         cluster_rows = TRUE,
+                                         cluster_columns = TRUE,
+                                         show_row_names = TRUE,
+                                         show_column_names = TRUE,
+                                         color_palette = "RdBu",
+                                         title = "RBM Partial Correlations",
+                                         name = "Partial\nCorrelation",
+                                         ...) {
   
   # ============================================================================
   # INPUT VALIDATION
@@ -74,32 +205,23 @@ PlotRBMHeatmap <- function(rbmObject,
   
   # Extract partial correlation matrix
   pcor_matrix <- rbmObject$partial_correlations
-  
-  # Filter to specific features if requested
+
   if (!is.null(features)) {
     if (!is.character(features)) {
       stop("features must be a character vector of feature names")
     }
-    
-    # Check which features are available
-    available_features <- intersect(features, rownames(pcor_matrix))
-    missing_features <- setdiff(features, rownames(pcor_matrix))
-    
-    if (length(missing_features) > 0) {
-      warning(sprintf("Features not found in RBM: %s",
-                     paste(missing_features, collapse = ", ")))
-    }
-    
-    if (length(available_features) == 0) {
-      stop("None of the specified features are available in the RBM")
-    }
-    
-    # Subset matrix
-    pcor_matrix <- pcor_matrix[available_features, available_features, drop = FALSE]
+    pcor_matrix <- .subset_matrix_to_features(pcor_matrix, features)
   } else {
     # Use only valid features (those with non-NA values)
     valid_rows <- rowSums(!is.na(pcor_matrix)) > 0
     pcor_matrix <- pcor_matrix[valid_rows, valid_rows, drop = FALSE]
+
+    selected <- .select_features_from_partial_cor(
+      pcor_matrix = pcor_matrix,
+      nEdges = nEdges,
+      nFeatures = nFeatures
+    )
+    pcor_matrix <- pcor_matrix[selected, selected, drop = FALSE]
   }
   
   # Check for empty matrix
@@ -207,6 +329,39 @@ PlotRBMHeatmap <- function(rbmObject,
 }
 
 
+#' Plot RBM Partial Correlations as Heatmap
+#'
+#' Backward-compatible wrapper for PlotPartialCorrelationHeatmap().
+#'
+#' @inheritParams PlotPartialCorrelationHeatmap
+#' @export
+PlotRBMHeatmap <- function(rbmObject,
+                           features = NULL,
+                           cluster_rows = TRUE,
+                           cluster_columns = TRUE,
+                           show_row_names = TRUE,
+                           show_column_names = TRUE,
+                           color_palette = "RdBu",
+                           title = "RBM Partial Correlations",
+                           name = "Partial\nCorrelation",
+                           ...) {
+  PlotPartialCorrelationHeatmap(
+    rbmObject = rbmObject,
+    features = features,
+    nEdges = 50,
+    nFeatures = NULL,
+    cluster_rows = cluster_rows,
+    cluster_columns = cluster_columns,
+    show_row_names = show_row_names,
+    show_column_names = show_column_names,
+    color_palette = color_palette,
+    title = title,
+    name = name,
+    ...
+  )
+}
+
+
 #' Plot RBM Weights as Heatmap
 #'
 #' Creates a heatmap visualization of the weight matrix from an RBM, showing
@@ -250,17 +405,18 @@ PlotRBMHeatmap <- function(rbmObject,
 #'   factors = "CellType"
 #' )
 #' }
-PlotRBMWeights <- function(rbmObject,
-                          features = NULL,
-                          factors = NULL,
-                          cluster_rows = TRUE,
-                          cluster_columns = FALSE,
-                          show_row_names = TRUE,
-                          show_column_names = TRUE,
-                          color_palette = "RdBu",
-                          title = "RBM Weights: Features to Hidden Factors",
-                          name = "Weight",
-                          ...) {
+PlotRBMWeightsHeatmap <- function(rbmObject,
+                                 features = NULL,
+                                 factors = NULL,
+                                 nFeatures = 50,
+                                 cluster_rows = TRUE,
+                                 cluster_columns = FALSE,
+                                 show_row_names = TRUE,
+                                 show_column_names = TRUE,
+                                 color_palette = "RdBu",
+                                 title = "RBM Weights: Features to Hidden Factors",
+                                 name = "Weight",
+                                 ...) {
   
   # ============================================================================
   # INPUT VALIDATION
@@ -296,13 +452,21 @@ PlotRBMWeights <- function(rbmObject,
   # Concatenate horizontally
   weight_matrix <- do.call(cbind, weight_list)
   
-  # Filter features if specified
+  # Filter/select features
   if (!is.null(features)) {
     available <- intersect(features, rownames(weight_matrix))
     if (length(available) == 0) {
       stop("None of the specified features are available in the RBM")
     }
     weight_matrix <- weight_matrix[available, , drop = FALSE]
+  } else {
+    selected <- .select_features_from_weights_per_layer(
+      weights_per_layer = rbmObject$weights_per_layer,
+      factors_to_plot = factors_to_plot,
+      nFeatures = nFeatures
+    )
+    selected <- intersect(selected, rownames(weight_matrix))
+    weight_matrix <- weight_matrix[selected, , drop = FALSE]
   }
   
   # ============================================================================
@@ -389,4 +553,38 @@ PlotRBMWeights <- function(rbmObject,
   )
   
   return(heatmap)
+}
+
+
+#' Plot RBM Weights as Heatmap
+#'
+#' Backward-compatible wrapper for PlotRBMWeightsHeatmap().
+#'
+#' @inheritParams PlotRBMWeightsHeatmap
+#' @export
+PlotRBMWeights <- function(rbmObject,
+                           features = NULL,
+                           factors = NULL,
+                           cluster_rows = TRUE,
+                           cluster_columns = FALSE,
+                           show_row_names = TRUE,
+                           show_column_names = TRUE,
+                           color_palette = "RdBu",
+                           title = "RBM Weights: Features to Hidden Factors",
+                           name = "Weight",
+                           ...) {
+  PlotRBMWeightsHeatmap(
+    rbmObject = rbmObject,
+    features = features,
+    factors = factors,
+    nFeatures = 50,
+    cluster_rows = cluster_rows,
+    cluster_columns = cluster_columns,
+    show_row_names = show_row_names,
+    show_column_names = show_column_names,
+    color_palette = color_palette,
+    title = title,
+    name = name,
+    ...
+  )
 }

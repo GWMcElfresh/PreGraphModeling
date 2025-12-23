@@ -2,7 +2,7 @@
 #'
 #' Fits a Restricted Boltzmann Machine (RBM) to connect features from a Seurat object
 #' to a hidden layer populated by metadata factors. The edges are estimated using
-#' partial correlations via quasilikelihood for the specified family, then trained
+#' partial correlations via pseudolikelihood for the specified family, then trained
 #' using Contrastive Divergence.
 #'
 #' @param seuratObject A Seurat object or SeuratObject containing single-cell data.
@@ -10,12 +10,19 @@
 #'   If NULL, uses all features (default: NULL).
 #' @param hiddenFactors Character vector of metadata column names to use as hidden units.
 #'   These represent outcome or grouping variables.
+#' @param partialCorrelations Optional. A PartialCorrelations object (output from
+#'   EstimatePartialCorrelations or EstimatePartialCorrelationsFromSeurat) containing
+#'   pre-computed partial correlations. If NULL or invalid, partial correlations will
+#'   be computed on-the-fly. Using pre-computed correlations is recommended for:
+#'   (1) inspecting correlations before fitting, (2) reusing across multiple RBM fits,
+#'   (3) saving computation time. Default: NULL.
 #' @param assay Character string specifying which assay to use (default: "RNA").
 #' @param layer Character string specifying which layer to use (default: "counts").
-#' @param family Character string specifying the distribution family for quasilikelihood.
+#' @param family Character string specifying the distribution family for pseudolikelihood estimation.
 #'   Options: "zinb" (zero-inflated negative binomial, default), "nb", "poisson", "gaussian".
+#'   Ignored if partialCorrelations is provided.
 #' @param minNonZero Minimum number of non-zero observations required for a feature
-#'   to be included (default: 10).
+#'   to be included (default: 10). Ignored if partialCorrelations is provided.
 #' @param cd_k Number of Gibbs sampling steps for Contrastive Divergence (default: 1).
 #'   Use cd_k=1 for CD-1, cd_k=5 for CD-5, etc.
 #' @param learning_rate Learning rate for weight updates (default: 0.01).
@@ -46,9 +53,18 @@
 #'   }
 #'
 #' @details
+#' **Recommended Workflow:**
+#' For best results, pre-compute partial correlations using EstimatePartialCorrelationsFromSeurat,
+#' inspect them, then pass to FitRBM:
+#' \preformatted{
+#' pcor <- EstimatePartialCorrelationsFromSeurat(seurat_obj, family = "zinb", parallel = TRUE)
+#' print(pcor)  # Inspect
+#' rbm <- FitRBM(seurat_obj, hiddenFactors = "CellType", partialCorrelations = pcor)
+#' }
+#'
 #' The RBM is fit by:
 #' 1. Extracting expression data for specified features
-#' 2. Computing partial correlations among features using quasilikelihood
+#' 2. Using pre-computed partial correlations OR computing them via pseudolikelihood
 #' 3. Initializing connections from features to hidden metadata factors (correlation-based)
 #' 4. Training weights using Contrastive Divergence (CD-k) or Persistent CD
 #' 5. Computing bias terms based on feature means and metadata distributions
@@ -59,25 +75,38 @@
 #' @export
 #' @examples
 #' \dontrun{
-#' # Fit RBM with cell type as hidden layer, using CD-1
-#' rbm <- FitRBM(
+#' # Recommended: Pre-compute partial correlations first
+#' pcor <- EstimatePartialCorrelationsFromSeurat(
 #'   seuratObject = pbmc,
-#'   visibleFeatures = c("CD3D", "CD8A", "CD4", "CD19"),
-#'   hiddenFactors = "CellType",
 #'   family = "zinb",
-#'   cd_k = 1,
-#'   n_epochs = 10,
 #'   parallel = TRUE
 #' )
 #'
-#' # Fit RBM with multiple metadata factors using Persistent CD
+#' # Fit RBM with pre-computed partial correlations
 #' rbm <- FitRBM(
 #'   seuratObject = pbmc,
-#'   hiddenFactors = c("CellType", "Treatment", "Batch"),
-#'   family = "zinb",
+#'   hiddenFactors = "CellType",
+#'   partialCorrelations = pcor,
 #'   cd_k = 5,
-#'   persistent = TRUE,
+#'   n_epochs = 20,
+#'   parallel = TRUE
+#' )
+#'
+#' # Reuse partial correlations for another RBM with different hidden factors
+#' rbm2 <- FitRBM(
+#'   seuratObject = pbmc,
+#'   hiddenFactors = c("CellType", "Treatment"),
+#'   partialCorrelations = pcor,
+#'   cd_k = 5,
 #'   n_epochs = 20
+#' )
+#'
+#' # Legacy: Compute on-the-fly (still supported)
+#' rbm_legacy <- FitRBM(
+#'   seuratObject = pbmc,
+#'   hiddenFactors = "CellType",
+#'   family = "zinb",
+#'   parallel = TRUE
 #' )
 #'
 #' # Access the weights and training error
@@ -87,6 +116,7 @@
 FitRBM <- function(seuratObject,
                    visibleFeatures = NULL,
                    hiddenFactors,
+                   partialCorrelations = NULL,
                    assay = "RNA",
                    layer = "counts",
                    family = "zinb",
@@ -102,7 +132,6 @@ FitRBM <- function(seuratObject,
                    parallel = FALSE,
                    numWorkers = NULL,
                    verbose = TRUE) {
-
   # ============================================================================
   # INPUT VALIDATION
   # ============================================================================
@@ -123,8 +152,10 @@ FitRBM <- function(seuratObject,
   metadata_obj <- seuratObject@meta.data
   missing_factors <- setdiff(hiddenFactors, colnames(metadata_obj))
   if (length(missing_factors) > 0) {
-    stop(sprintf("Metadata columns not found: %s",
-                paste(missing_factors, collapse = ", ")))
+    stop(sprintf(
+      "Metadata columns not found: %s",
+      paste(missing_factors, collapse = ", ")
+    ))
   }
 
   if (verbose) {
@@ -144,20 +175,23 @@ FitRBM <- function(seuratObject,
   if (inherits(seuratObject, "Seurat")) {
     # For Seurat v5+ with layers
     if (requireNamespace("SeuratObject", quietly = TRUE)) {
-      tryCatch({
-        expr_matrix <- SeuratObject::LayerData(
-          object = seuratObject,
-          assay = assay,
-          layer = layer
-        )
-      }, error = function(e) {
-        # Fallback for older Seurat versions
-        expr_matrix <<- SeuratObject::GetAssayData(
-          object = seuratObject,
-          assay = assay,
-          layer = layer
-        )
-      })
+      tryCatch(
+        {
+          expr_matrix <- SeuratObject::LayerData(
+            object = seuratObject,
+            assay = assay,
+            layer = layer
+          )
+        },
+        error = function(e) {
+          # Fallback for older Seurat versions
+          expr_matrix <<- SeuratObject::GetAssayData(
+            object = seuratObject,
+            assay = assay,
+            layer = layer
+          )
+        }
+      )
     } else {
       stop("SeuratObject package required but not available")
     }
@@ -182,8 +216,10 @@ FitRBM <- function(seuratObject,
     }
     missing_features <- setdiff(visibleFeatures, rownames(expr_matrix))
     if (length(missing_features) > 0) {
-      warning(sprintf("Features not found in expression matrix: %s",
-                     paste(missing_features, collapse = ", ")))
+      warning(sprintf(
+        "Features not found in expression matrix: %s",
+        paste(missing_features, collapse = ", ")
+      ))
     }
     visibleFeatures <- intersect(visibleFeatures, rownames(expr_matrix))
     if (length(visibleFeatures) == 0) {
@@ -193,8 +229,10 @@ FitRBM <- function(seuratObject,
   }
 
   if (verbose) {
-    message(sprintf("  Expression matrix: %d features x %d cells",
-                   nrow(expr_matrix), ncol(expr_matrix)))
+    message(sprintf(
+      "  Expression matrix: %d features x %d cells",
+      nrow(expr_matrix), ncol(expr_matrix)
+    ))
   }
 
   # ============================================================================
@@ -207,28 +245,28 @@ FitRBM <- function(seuratObject,
   }
 
   metadata_df <- metadata_obj[, hiddenFactors, drop = FALSE]
-  
+
   # Detect type for each metadata factor
   hidden_layers_info <- list()
-  
+
   for (factor_name in hiddenFactors) {
     factor_info <- .detect_factor_type(
-      metadata_df[[factor_name]], 
+      metadata_df[[factor_name]],
       col_name = factor_name,
       verbose = verbose
     )
-    
+
     hidden_layers_info[[factor_name]] <- factor_info
   }
-  
+
   # Encode metadata factors appropriately
   if (verbose) {
     message("  Encoding metadata factors...")
   }
-  
+
   hidden_layers_encoded <- list()
   hidden_layers_dim <- list()
-  
+
   for (factor_name in hiddenFactors) {
     factor_info <- hidden_layers_info[[factor_name]]
     encoded <- .encode_factor(
@@ -236,65 +274,107 @@ FitRBM <- function(seuratObject,
       factor_info,
       col_name = factor_name
     )
-    
+
     hidden_layers_encoded[[factor_name]] <- encoded
     hidden_layers_dim[[factor_name]] <- ncol(encoded)
-    
+
     if (verbose) {
-      message(sprintf("    %s: %d hidden units (%s)", 
-                     factor_name, ncol(encoded), factor_info$type))
+      message(sprintf(
+        "    %s: %d hidden units (%s)",
+        factor_name, ncol(encoded), factor_info$type
+      ))
     }
   }
 
   # ============================================================================
-  # COMPUTE PARTIAL CORRELATIONS AMONG VISIBLE FEATURES
+  # COMPUTE OR USE PRE-COMPUTED PARTIAL CORRELATIONS
   # ============================================================================
 
-  if (verbose) {
-    message("Computing partial correlations among visible features...")
+  use_precomputed <- FALSE
+
+  if (!is.null(partialCorrelations)) {
+    if (verbose) {
+      message("Validating pre-computed partial correlations...")
+    }
+
+    # Validate the partial correlations object
+    validation <- .validate_partial_correlations(
+      partialCorrelations,
+      required_features = rownames(expr_matrix),
+      verbose = verbose
+    )
+
+    if (validation$valid) {
+      if (verbose) {
+        message(sprintf(
+          "  Using pre-computed partial correlations (%d features overlap)",
+          length(validation$overlap_features)
+        ))
+      }
+      use_precomputed <- TRUE
+      pcor_result <- partialCorrelations
+
+      # Use family from pre-computed if not explicitly specified
+      family <- partialCorrelations$family
+    } else {
+      if (verbose) {
+        message(sprintf("  Pre-computed partial correlations invalid: %s", validation$message))
+        message("  Computing partial correlations from expression data...")
+      }
+    }
   }
 
-  pcor_result <- EstimatePartialCorrelations(
-    expressionMatrix = expr_matrix,
-    metadata = NULL,  # Don't include metadata in feature-feature correlations
-    family = family,
-    minNonZero = minNonZero,
-    progressr = progressr,
-    parallel = parallel,
-    numWorkers = numWorkers,
-    verbose = verbose
-  )
+  if (!use_precomputed) {
+    if (verbose) {
+      message("Computing partial correlations among visible features...")
+    }
+
+    pcor_result <- EstimatePartialCorrelations(
+      expressionMatrix = expr_matrix,
+      metadata = NULL, # Don't include metadata in feature-feature correlations
+      family = family,
+      minNonZero = minNonZero,
+      progressr = progressr,
+      parallel = parallel,
+      numWorkers = numWorkers,
+      verbose = verbose
+    )
+  }
 
   # Get valid features (those that passed filtering)
   valid_features <- pcor_result$features
-  
+
   # ============================================================================
   # IDENTIFY FEATURES WITH NA/NaN PARTIAL CORRELATIONS
   # ============================================================================
-  
+
   # Check for features with NA/NaN in their partial correlation row/column
   pcor_matrix <- pcor_result$partial_cor[valid_features, valid_features, drop = FALSE]
-  
+
   # Identify features with any NA/NaN in their correlations
   na_per_feature <- rowSums(is.na(pcor_matrix) | is.nan(pcor_matrix))
   features_with_na_pcor <- valid_features[na_per_feature > 0]
-  
+
   if (length(features_with_na_pcor) > 0) {
     if (verbose) {
-      message(sprintf("  Identified %d features with NA/NaN partial correlations:", 
-                     length(features_with_na_pcor)))
+      message(sprintf(
+        "  Identified %d features with NA/NaN partial correlations:",
+        length(features_with_na_pcor)
+      ))
       if (length(features_with_na_pcor) <= 10) {
         message(sprintf("    %s", paste(features_with_na_pcor, collapse = ", ")))
       } else {
-        message(sprintf("    %s ... (and %d more)", 
-                       paste(head(features_with_na_pcor, 10), collapse = ", "),
-                       length(features_with_na_pcor) - 10))
+        message(sprintf(
+          "    %s ... (and %d more)",
+          paste(head(features_with_na_pcor, 10), collapse = ", "),
+          length(features_with_na_pcor) - 10
+        ))
       }
     }
-    
+
     # Remove features with NA/NaN from valid_features
     valid_features <- valid_features[na_per_feature == 0]
-    
+
     if (length(valid_features) == 0) {
       stop("No valid features remain after removing features with NA/NaN partial correlations")
     }
@@ -327,59 +407,61 @@ FitRBM <- function(seuratObject,
     factor_info <- hidden_layers_info[[factor_name]]
     encoded_hidden <- hidden_layers_encoded[[factor_name]]
     n_hidden_units <- ncol(encoded_hidden)
-    
+
     # Initialize weight matrix for this hidden layer
-    weights_matrix <- matrix(0, 
-                            nrow = length(valid_features), 
-                            ncol = n_hidden_units,
-                            dimnames = list(valid_features, colnames(encoded_hidden)))
-    
+    weights_matrix <- matrix(0,
+      nrow = length(valid_features),
+      ncol = n_hidden_units,
+      dimnames = list(valid_features, colnames(encoded_hidden))
+    )
+
     # Compute weights based on type-specific method matching activation function
     for (i in seq_along(valid_features)) {
       feature_name <- valid_features[i]
       feature_expr <- as.numeric(expr_valid[i, ])
-      
+
       for (j in seq_len(n_hidden_units)) {
         hidden_values <- encoded_hidden[, j]
-        
+
         # Type-specific weight computation matching activation function
         if (factor_info$type == "binary") {
           # Binary/Bernoulli: Use logistic regression coefficient approximation
           # Correlation scaled for sigmoid activation
           weight_val <- cor(feature_expr, hidden_values,
-                           method = "pearson",
-                           use = "pairwise.complete.obs")
+            method = "pearson",
+            use = "pairwise.complete.obs"
+          )
           # Scale by ~1.7 to approximate logistic regression (probit approximation)
           weight_val <- weight_val * 1.7
-          
         } else if (factor_info$type == "categorical") {
           # Categorical/Softmax: Use correlation for initial weights
           # Each unit in one-hot encoding gets independent weight
           weight_val <- cor(feature_expr, hidden_values,
-                           method = "pearson",
-                           use = "pairwise.complete.obs")
-          
+            method = "pearson",
+            use = "pairwise.complete.obs"
+          )
         } else if (factor_info$type == "ordinal") {
           # Ordinal/Gaussian: Use Pearson correlation for linear relationship
           weight_val <- cor(feature_expr, hidden_values,
-                           method = "pearson",
-                           use = "pairwise.complete.obs")
-          
+            method = "pearson",
+            use = "pairwise.complete.obs"
+          )
         } else if (factor_info$type == "continuous") {
           # Continuous/Gaussian: Use Pearson correlation for linear relationship
           weight_val <- cor(feature_expr, hidden_values,
-                           method = "pearson",
-                           use = "pairwise.complete.obs")
-          
+            method = "pearson",
+            use = "pairwise.complete.obs"
+          )
         } else {
           # Fallback: Spearman correlation
           weight_val <- cor(feature_expr, hidden_values,
-                           method = "spearman",
-                           use = "pairwise.complete.obs")
+            method = "spearman",
+            use = "pairwise.complete.obs"
+          )
         }
-        
+
         weights_matrix[i, j] <- weight_val
-        
+
         # Check for NA/NaN weights
         if (is.na(weight_val) || is.nan(weight_val)) {
           if (!(feature_name %in% features_with_na_weights)) {
@@ -387,59 +469,65 @@ FitRBM <- function(seuratObject,
           }
         }
       }
-      
+
       if (!is.null(p)) p()
     }
-    
+
     weights_per_layer[[factor_name]] <- weights_matrix
   }
-  
+
   # ============================================================================
   # IDENTIFY FEATURES WITH NA/NaN WEIGHTS
   # ============================================================================
-  
+
   if (length(features_with_na_weights) > 0) {
     if (verbose) {
-      message(sprintf("  Identified %d features with NA/NaN weights:", 
-                     length(features_with_na_weights)))
+      message(sprintf(
+        "  Identified %d features with NA/NaN weights:",
+        length(features_with_na_weights)
+      ))
       if (length(features_with_na_weights) <= 10) {
         message(sprintf("    %s", paste(features_with_na_weights, collapse = ", ")))
       } else {
-        message(sprintf("    %s ... (and %d more)", 
-                       paste(head(features_with_na_weights, 10), collapse = ", "),
-                       length(features_with_na_weights) - 10))
+        message(sprintf(
+          "    %s ... (and %d more)",
+          paste(head(features_with_na_weights, 10), collapse = ", "),
+          length(features_with_na_weights) - 10
+        ))
       }
     }
-    
+
     # Remove features with NA/NaN weights
     features_to_keep <- setdiff(valid_features, features_with_na_weights)
-    
+
     if (length(features_to_keep) == 0) {
       stop("No valid features remain after removing features with NA/NaN weights")
     }
-    
+
     valid_features <- features_to_keep
     expr_valid <- expr_valid[valid_features, , drop = FALSE]
-    
+
     # Update all weight matrices
     for (factor_name in hiddenFactors) {
       weights_per_layer[[factor_name]] <- weights_per_layer[[factor_name]][valid_features, , drop = FALSE]
     }
   }
-  
+
   # ============================================================================
   # RECOMPUTE PARTIAL CORRELATIONS ON FINAL FEATURE SET
   # ============================================================================
-  
+
   # Determine if we need to recompute
   need_recompute <- length(features_with_na_pcor) > 0 || length(features_with_na_weights) > 0
-  
+
   if (need_recompute) {
     if (verbose) {
-      message(sprintf("  Recomputing partial correlations with final feature set (%d features)...", 
-                     length(valid_features)))
+      message(sprintf(
+        "  Recomputing partial correlations with final feature set (%d features)...",
+        length(valid_features)
+      ))
     }
-    
+
     # IMPORTANT: Recompute partial correlations with only the final retained features
     # This is necessary because partial correlations condition on ALL features,
     # so removing features changes the definition of the quasilikelihood
@@ -448,12 +536,12 @@ FitRBM <- function(seuratObject,
       metadata = NULL,
       family = family,
       minNonZero = minNonZero,
-      progressr = progressr,  # Pass through progress settings
-      parallel = parallel,     # Pass through parallel settings
+      progressr = progressr, # Pass through progress settings
+      parallel = parallel, # Pass through parallel settings
       numWorkers = numWorkers, # Pass through worker count
-      verbose = verbose        # Pass through verbose setting
+      verbose = verbose # Pass through verbose setting
     )
-    
+
     pcor_matrix <- pcor_result_final$partial_cor[valid_features, valid_features, drop = FALSE]
   } else {
     # No features were removed, use original partial correlation matrix
@@ -474,7 +562,7 @@ FitRBM <- function(seuratObject,
 
   # Hidden bias: mean value for each encoded hidden layer
   hidden_bias_per_layer <- list()
-  
+
   for (factor_name in hiddenFactors) {
     encoded_hidden <- hidden_layers_encoded[[factor_name]]
     hidden_bias_per_layer[[factor_name]] <- colMeans(encoded_hidden)
@@ -483,16 +571,18 @@ FitRBM <- function(seuratObject,
   # ============================================================================
   # TRAIN RBM WITH CONTRASTIVE DIVERGENCE
   # ============================================================================
-  
+
   if (verbose) {
     message(sprintf("\nTraining RBM with Contrastive Divergence (CD-%d)...", cd_k))
     if (persistent) {
       message("  Using Persistent Contrastive Divergence")
     }
-    message(sprintf("  Learning rate: %.4f, Epochs: %d, Batch size: %d", 
-                   learning_rate, n_epochs, batch_size))
+    message(sprintf(
+      "  Learning rate: %.4f, Epochs: %d, Batch size: %d",
+      learning_rate, n_epochs, batch_size
+    ))
   }
-  
+
   # Train the RBM
   training_result <- .train_rbm_cd(
     visible_data = expr_valid,
@@ -511,13 +601,13 @@ FitRBM <- function(seuratObject,
     verbose = verbose,
     progressr = progressr
   )
-  
+
   # Update weights and biases from training
   weights_per_layer <- training_result$weights_per_layer
   visible_bias <- training_result$visible_bias
   hidden_bias_per_layer <- training_result$hidden_bias_per_layer
   training_error <- training_result$training_error
-  
+
   if (verbose) {
     message(sprintf("  Final reconstruction error: %.6f", training_error[length(training_error)]))
   }
@@ -525,17 +615,17 @@ FitRBM <- function(seuratObject,
   # ============================================================================
   # PREPARE OUTPUT - MULTI-LAYER RBM STRUCTURE
   # ============================================================================
-  
+
   # Combine all excluded features
   all_excluded_features <- unique(c(
     pcor_result$excluded_features,
     features_with_na_pcor,
     features_with_na_weights
   ))
-  
+
   # Count valid pairs from the pruned pcor_matrix
   n_valid_pairs <- sum(!is.na(pcor_matrix) & upper.tri(pcor_matrix))
-  
+
   # Count total hidden units across all layers
   total_hidden_units <- sum(unlist(hidden_layers_dim))
 
@@ -576,8 +666,10 @@ FitRBM <- function(seuratObject,
   if (verbose) {
     message("RBM fitting complete!")
     message(sprintf("  Visible layer: %d features", fit_info$n_features))
-    message(sprintf("  Hidden layers: %d layers with %d total units", 
-                   fit_info$n_hidden_layers, fit_info$n_hidden_units_total))
+    message(sprintf(
+      "  Hidden layers: %d layers with %d total units",
+      fit_info$n_hidden_layers, fit_info$n_hidden_units_total
+    ))
     for (factor_name in hiddenFactors) {
       factor_info <- hidden_layers_info[[factor_name]]
       n_units <- hidden_layers_dim[[factor_name]]
@@ -597,22 +689,24 @@ print.RBM <- function(x, ...) {
   cat("Multi-Layer Restricted Boltzmann Machine\n")
   cat("=========================================\n\n")
   cat(sprintf("Visible layer:  %d features\n", x$fit_info$n_features))
-  cat(sprintf("Hidden layers:  %d layers (%s)\n",
-              x$fit_info$n_hidden_layers,
-              paste(x$hidden_factors, collapse = ", ")))
+  cat(sprintf(
+    "Hidden layers:  %d layers (%s)\n",
+    x$fit_info$n_hidden_layers,
+    paste(x$hidden_factors, collapse = ", ")
+  ))
   cat(sprintf("Total hidden units: %d\n", x$fit_info$n_hidden_units_total))
-  
+
   cat("\nHidden layer details:\n")
   for (factor_name in x$hidden_factors) {
     factor_info <- x$hidden_layers_info[[factor_name]]
     n_units <- x$fit_info$hidden_layers_dim[[factor_name]]
     cat(sprintf("  %s: %d units, type=%s\n", factor_name, n_units, factor_info$type))
   }
-  
+
   cat(sprintf("\nFamily:         %s\n", x$family))
   cat(sprintf("Observations:   %d cells\n", x$fit_info$n_cells))
   cat(sprintf("Valid feature pairs: %d\n", x$fit_info$n_pairs))
-  
+
   # Training information
   if (!is.null(x$training_error)) {
     cat(sprintf("\nTraining epochs: %d\n", length(x$training_error)))
@@ -622,16 +716,22 @@ print.RBM <- function(x, ...) {
   if (length(x$fit_info$excluded_features) > 0) {
     cat(sprintf("\nExcluded features: %d total\n", length(x$fit_info$excluded_features)))
     if (!is.null(x$fit_info$n_excluded_low_counts) && x$fit_info$n_excluded_low_counts > 0) {
-      cat(sprintf("  - %d features: < %d non-zero observations\n",
-                  x$fit_info$n_excluded_low_counts, x$fit_info$minNonZero))
+      cat(sprintf(
+        "  - %d features: < %d non-zero observations\n",
+        x$fit_info$n_excluded_low_counts, x$fit_info$minNonZero
+      ))
     }
     if (!is.null(x$fit_info$n_excluded_na_pcor) && x$fit_info$n_excluded_na_pcor > 0) {
-      cat(sprintf("  - %d features: NA/NaN partial correlations\n",
-                  x$fit_info$n_excluded_na_pcor))
+      cat(sprintf(
+        "  - %d features: NA/NaN partial correlations\n",
+        x$fit_info$n_excluded_na_pcor
+      ))
     }
     if (!is.null(x$fit_info$n_excluded_na_weights) && x$fit_info$n_excluded_na_weights > 0) {
-      cat(sprintf("  - %d features: NA/NaN weights\n",
-                  x$fit_info$n_excluded_na_weights))
+      cat(sprintf(
+        "  - %d features: NA/NaN weights\n",
+        x$fit_info$n_excluded_na_weights
+      ))
     }
   }
 

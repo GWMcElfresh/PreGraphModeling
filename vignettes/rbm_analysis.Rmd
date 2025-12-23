@@ -20,11 +20,11 @@ knitr::opts_chunk$set(
 
 ## Introduction
 
-This vignette demonstrates how to use the Restricted Boltzmann Machine (RBM) functionality in PreGraphModeling to model relationships between gene expression features and cell metadata. The RBM uses partial correlations estimated via quasilikelihood to capture direct relationships between features while accounting for confounding effects.
+This vignette demonstrates how to use the Restricted Boltzmann Machine (RBM) functionality in PreGraphModeling to model relationships between gene expression features and cell metadata. The RBM uses partial correlations estimated via pseudolikelihood to capture direct relationships between features while accounting for confounding effects.
 
 ## Key Features
 
-- **Partial Correlation Estimation**: Compute partial correlations using quasilikelihood for various families (ZINB, NB, Poisson, Gaussian)
+- **Partial Correlation Estimation**: Compute partial correlations using pseudolikelihood for various families (ZINB, NB, Poisson, Gaussian)
 - **RBM Fitting**: Connect gene expression features to metadata factors through learned weights
 - **Parallel Processing**: Leverage `progressr` for efficient computation at scale
 - **Visualization**: Create heatmaps of partial correlations and weights using ComplexHeatmap
@@ -52,33 +52,47 @@ library(ComplexHeatmap)
 
 ## Basic Workflow
 
+The recommended workflow for RBM analysis has two steps:
+
+1. **Pre-compute partial correlations** using `EstimatePartialCorrelationsFromSeurat()` - this allows you to inspect the correlations and reuse them across multiple RBM fits
+2. **Fit the RBM** using `FitRBM()` with the pre-computed correlations
+
 ### 1. Estimate Partial Correlations
 
-The first step is to compute partial correlations between features using quasilikelihood estimation. This accounts for the zero-inflated nature of single-cell data.
+The first step is to compute partial correlations between features using pseudolikelihood estimation. This accounts for the zero-inflated nature of single-cell data.
 
 ```{r eval=FALSE}
 # Load example Seurat object (e.g., PBMC dataset)
 # For this example, we'll assume you have a Seurat object called 'pbmc'
 
-# Extract expression matrix
-expr_matrix <- GetAssayData(pbmc, assay = "RNA", slot = "counts")
-
-# Estimate partial correlations using ZINB family
-pcor_result <- EstimatePartialCorrelations(
-  expressionMatrix = expr_matrix,
+# Recommended: Use the Seurat wrapper for convenience
+pcor <- EstimatePartialCorrelationsFromSeurat(
+  seuratObject = pbmc,
   family = "zinb",
   minNonZero = 10,
   parallel = TRUE,
-  progressr = TRUE,
   verbose = TRUE
 )
 
-# View the partial correlation matrix
-pcor_matrix <- pcor_result$partial_cor
+PreGraphModeling:::.validate_partial_correlations(pcor_result)
+
+# View the partial correlations object
+print(pcor)
+
+# Access the partial correlation matrix directly
+pcor_matrix <- pcor$partial_cor
 print(dim(pcor_matrix))
+
+# The object contains:
+# - partial_cor: the correlation matrix
+# - features: valid features that passed filtering
+# - family: the distribution family used
+# - excluded_features: features excluded due to low counts
 ```
 
-The `EstimatePartialCorrelations` function supports multiple distribution families:
+**Alternative:** You can also use the lower-level `EstimatePartialCorrelations()` function with a raw expression matrix if you need more control.
+
+The function supports multiple distribution families:
 
 - **"zinb"** (default): Zero-inflated negative binomial - best for single-cell count data
 - **"nb"**: Negative binomial
@@ -88,24 +102,100 @@ The `EstimatePartialCorrelations` function supports multiple distribution famili
 
 ### 2. Fit the RBM
 
-Next, fit an RBM to connect gene expression features to cell metadata factors:
+Next, fit an RBM using the pre-computed partial correlations:
 
 ```{r eval=FALSE}
 # Fit RBM with cell type as the hidden layer
+# Pass the pre-computed partial correlations
 rbm <- FitRBM(
   seuratObject = pbmc,
-  visibleFeatures = NULL,  # NULL = use all features
   hiddenFactors = "CellType",
-  family = "zinb",
-  minNonZero = 10,
+  partialCorrelations = pcor, # Use pre-computed correlations
+  cd_k = 5, # Contrastive Divergence steps
+  n_epochs = 20, # Training epochs
+  learning_rate = 0.01, # Step size
   parallel = TRUE,
-  progressr = TRUE,
   verbose = TRUE
 )
 
 # Print RBM summary
 print(rbm)
 summary(rbm)
+```
+
+**Why pre-compute?**
+
+1. **Inspect before fitting**: You can examine the partial correlations before committing to RBM training
+2. **Reuse across fits**: Fit multiple RBMs with different hidden factors without recomputing correlations
+3. **Save computation time**: Partial correlation estimation is the most expensive step
+4. **Save/load**: You can save partial correlations to disk and reload them later
+
+```{r eval=FALSE}
+# Reuse partial correlations for another RBM
+rbm_multi <- FitRBM(
+  seuratObject = pbmc,
+  hiddenFactors = c("CellType", "Treatment"),
+  partialCorrelations = pcor, # Same pre-computed correlations
+  cd_k = 5,
+  n_epochs = 20
+)
+
+# Save partial correlations for later use
+saveRDS(pcor, "partial_correlations.rds")
+
+# Load and reuse
+pcor_loaded <- readRDS("partial_correlations.rds")
+rbm_new <- FitRBM(pbmc, "CellType", partialCorrelations = pcor_loaded)
+```
+
+**Legacy mode:** If you don't provide `partialCorrelations`, FitRBM will compute them on-the-fly (backward compatible):
+
+```{r eval=FALSE}
+# This still works, but is not recommended for repeated fits
+rbm_legacy <- FitRBM(
+  seuratObject = pbmc,
+  hiddenFactors = "CellType",
+  family = "zinb", # Only used when computing on-the-fly
+  parallel = TRUE
+)
+```
+
+#### Contrastive Divergence Training
+
+The RBM is trained using Contrastive Divergence (CD-k). Key parameters:
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `cd_k` | 1 | Number of Gibbs sampling steps (CD-1, CD-5, etc.) |
+| `n_epochs` | 10 | Training iterations over the data |
+| `learning_rate` | 0.01 | Step size for weight updates |
+| `batch_size` | 100 | Mini-batch size |
+| `momentum` | 0.5 | Momentum coefficient for updates |
+| `weight_decay` | 0.0001 | L2 regularization |
+| `persistent` | FALSE | Use Persistent CD (maintains chains) |
+
+```{r eval=FALSE}
+# More aggressive training with Persistent CD
+rbm_trained <- FitRBM(
+  seuratObject = pbmc,
+  hiddenFactors = "CellType",
+  family = "zinb",
+  cd_k = 10, # More Gibbs steps
+  n_epochs = 50, # More epochs
+  learning_rate = 0.005,
+  batch_size = 64,
+  persistent = TRUE, # Persistent Contrastive Divergence
+  momentum = 0.9,
+  weight_decay = 0.001,
+  parallel = TRUE
+)
+
+# Check training convergence
+plot(rbm_trained$training_error,
+  type = "l",
+  xlab = "Epoch", ylab = "Reconstruction Error",
+  main = "RBM Training Convergence"
+)
 ```
 
 You can use multiple metadata factors as hidden units:
@@ -117,9 +207,12 @@ rbm_multi <- FitRBM(
   visibleFeatures = NULL,
   hiddenFactors = c("CellType", "Treatment", "Batch"),
   family = "zinb",
+  cd_k = 5,
+  n_epochs = 20,
   parallel = TRUE
 )
 ```
+
 
 ### 3. Visualize Results
 
@@ -145,9 +238,11 @@ Plot partial correlations for specific features of interest:
 
 ```{r eval=FALSE}
 # Select marker genes
-marker_genes <- c("CD3D", "CD3E", "CD8A", "CD4",    # T cells
-                 "CD19", "MS4A1", "CD79A",          # B cells
-                 "CD14", "LYZ", "FCGR3A")           # Monocytes
+marker_genes <- c(
+  "CD3D", "CD3E", "CD8A", "CD4", # T cells
+  "CD19", "MS4A1", "CD79A", # B cells
+  "CD14", "LYZ", "FCGR3A"
+) # Monocytes
 
 heatmap_markers <- PlotRBMHeatmap(
   rbmObject = rbm,
@@ -353,7 +448,7 @@ When clustering is enabled in heatmaps, groups of features with similar patterns
 
 ## Complete Example
 
-Here's a complete workflow from start to finish:
+Here's a complete workflow from start to finish using the recommended two-step approach:
 
 ```{r eval=FALSE}
 library(PreGraphModeling)
@@ -364,24 +459,51 @@ library(progressr)
 # Load data
 pbmc <- readRDS("pbmc3k.rds")
 
-# Fit RBM with progress tracking
+# Step 1: Pre-compute partial correlations
+# This is the most expensive step - do it once and reuse
 handlers(global = TRUE)
 with_progress({
-  rbm <- FitRBM(
+  pcor <- EstimatePartialCorrelationsFromSeurat(
     seuratObject = pbmc,
-    visibleFeatures = NULL,
-    hiddenFactors = c("CellType", "Phase"),
     family = "zinb",
     minNonZero = 10,
     parallel = TRUE,
     numWorkers = 4,
-    progressr = TRUE,
+    verbose = TRUE
+  )
+})
+
+# Inspect the partial correlations
+print(pcor)
+
+# Save partial correlations for later reuse
+saveRDS(pcor, "pbmc_partial_correlations.rds")
+
+# Step 2: Fit RBM with the pre-computed partial correlations
+with_progress({
+  rbm <- FitRBM(
+    seuratObject = pbmc,
+    hiddenFactors = c("CellType", "Phase"),
+    partialCorrelations = pcor, # Use pre-computed!
+    cd_k = 5,
+    n_epochs = 20,
+    parallel = TRUE,
+    numWorkers = 4,
     verbose = TRUE
   )
 })
 
 # View summary
 summary(rbm)
+
+# Fit another RBM with different hidden factors (no recomputation!)
+rbm_celltype <- FitRBM(
+  seuratObject = pbmc,
+  hiddenFactors = "CellType",
+  partialCorrelations = pcor,
+  cd_k = 5,
+  n_epochs = 20
+)
 
 # Visualize partial correlations
 heatmap_pcor <- PlotRBMHeatmap(
@@ -406,10 +528,10 @@ draw(heatmap_weights)
 saveRDS(rbm, "pbmc_rbm_model.rds")
 
 # Export partial correlation matrix
-write.csv(rbm$partial_correlations, "partial_correlations.csv")
+write.csv(pcor$partial_cor, "partial_correlations.csv")
 
-# Export weights
-write.csv(rbm$weights, "rbm_weights.csv")
+# Export weights (from first hidden layer)
+write.csv(rbm$weights_per_layer[[1]], "rbm_weights_celltype.csv")
 ```
 
 ## Session Info
@@ -422,12 +544,13 @@ sessionInfo()
 
 - Restricted Boltzmann Machines provide a probabilistic framework for unsupervised learning
 - Partial correlations capture direct relationships while controlling for confounders
-- Quasilikelihood provides robust parameter estimation for non-standard distributions
+- Pseudolikelihood provides a computationally efficient approximation to full likelihood training by conditioning on neighbors
 - ComplexHeatmap enables sophisticated visualization of high-dimensional data
 
 ## See Also
 
-- `?EstimatePartialCorrelations` - Compute partial correlations via quasilikelihood
+- `?EstimatePartialCorrelationsFromSeurat` - Compute partial correlations from Seurat object (recommended)
+- `?EstimatePartialCorrelations` - Compute partial correlations from expression matrix
 - `?FitRBM` - Fit restricted Boltzmann machine to Seurat object
 - `?PlotRBMHeatmap` - Visualize partial correlations as heatmap
 - `?PlotRBMWeights` - Visualize RBM weights as heatmap

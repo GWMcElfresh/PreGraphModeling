@@ -24,16 +24,17 @@ Imports:
     mgcv,
     stats,
     grDevices,
-    grid
+    grid,
+    future,
+    future.apply
 Suggests:
     testthat (>= 3.0.0),
     Seurat,
-    future,
-    future.apply,
     HDF5Array,
     DelayedArray, 
     Matrix,
     progressr,
+    igraph,
     ComplexHeatmap,
     circlize,
     viridisLite,
