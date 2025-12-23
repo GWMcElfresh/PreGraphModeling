@@ -310,7 +310,7 @@ FitRBM <- function(seuratObject,
                             ncol = n_hidden_units,
                             dimnames = list(valid_features, colnames(encoded_hidden)))
     
-    # Compute weights based on correlation with encoded hidden units
+    # Compute weights based on type-specific method matching activation function
     for (i in seq_along(valid_features)) {
       feature_name <- valid_features[i]
       feature_expr <- as.numeric(expr_valid[i, ])
@@ -318,11 +318,41 @@ FitRBM <- function(seuratObject,
       for (j in seq_len(n_hidden_units)) {
         hidden_values <- encoded_hidden[, j]
         
-        # Compute correlation (edge weight)
-        # Use Spearman for robustness to non-linearity
-        weight_val <- cor(feature_expr, hidden_values,
-                         method = "spearman",
-                         use = "pairwise.complete.obs")
+        # Type-specific weight computation matching activation function
+        if (factor_info$type == "binary") {
+          # Binary/Bernoulli: Use logistic regression coefficient approximation
+          # Correlation scaled for sigmoid activation
+          weight_val <- cor(feature_expr, hidden_values,
+                           method = "pearson",
+                           use = "pairwise.complete.obs")
+          # Scale by ~1.7 to approximate logistic regression (probit approximation)
+          weight_val <- weight_val * 1.7
+          
+        } else if (factor_info$type == "categorical") {
+          # Categorical/Softmax: Use correlation for initial weights
+          # Each unit in one-hot encoding gets independent weight
+          weight_val <- cor(feature_expr, hidden_values,
+                           method = "pearson",
+                           use = "pairwise.complete.obs")
+          
+        } else if (factor_info$type == "ordinal") {
+          # Ordinal/Gaussian: Use Pearson correlation for linear relationship
+          weight_val <- cor(feature_expr, hidden_values,
+                           method = "pearson",
+                           use = "pairwise.complete.obs")
+          
+        } else if (factor_info$type == "continuous") {
+          # Continuous/Gaussian: Use Pearson correlation for linear relationship
+          weight_val <- cor(feature_expr, hidden_values,
+                           method = "pearson",
+                           use = "pairwise.complete.obs")
+          
+        } else {
+          # Fallback: Spearman correlation
+          weight_val <- cor(feature_expr, hidden_values,
+                           method = "spearman",
+                           use = "pairwise.complete.obs")
+        }
         
         weights_matrix[i, j] <- weight_val
         
