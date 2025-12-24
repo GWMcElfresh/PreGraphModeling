@@ -202,6 +202,11 @@ PlotPartialCorrelationHeatmap <- function(rbmObject,
     stop("Package 'ComplexHeatmap' is required for this function. ",
          "Install it with: BiocManager::install('ComplexHeatmap')")
   }
+
+  if (!requireNamespace("circlize", quietly = TRUE)) {
+    stop("Package 'circlize' is required for this function. ",
+         "Install it with: BiocManager::install('circlize')")
+  }
   
   # Extract partial correlation matrix
   pcor_matrix <- rbmObject$partial_correlations
@@ -428,6 +433,10 @@ PlotRBMWeightsHeatmap <- function(rbmObject,
   
   if (!requireNamespace("ComplexHeatmap", quietly = TRUE)) {
     stop("Package 'ComplexHeatmap' is required. Install with: BiocManager::install('ComplexHeatmap')")
+  }
+
+  if (!requireNamespace("circlize", quietly = TRUE)) {
+    stop("Package 'circlize' is required. Install with: BiocManager::install('circlize')")
   }
   
   # Determine which factors to plot

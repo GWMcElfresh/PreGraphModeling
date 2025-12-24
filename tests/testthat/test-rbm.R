@@ -120,13 +120,22 @@ test_that("EstimatePartialCorrelations handles different families", {
 
 test_that("FitRBM validates input correctly", {
   skip_if_not_installed("SeuratObject")
+  skip_if_not_installed("Matrix")
   
-  # Create a simple mock Seurat-like object
-  # This is a simplified test - in real use, would use actual Seurat object
-  
+  expr_matrix <- Matrix::Matrix(
+    matrix(rpois(10 * 5, lambda = 5), nrow = 10, ncol = 5,
+           dimnames = list(paste0("Gene", 1:10), paste0("Cell", 1:5))),
+    sparse = TRUE
+  )
+  metadata <- data.frame(
+    Factor1 = sample(c("A", "B"), size = 5, replace = TRUE),
+    row.names = paste0("Cell", 1:5)
+  )
+  seurat_obj <- SeuratObject::CreateSeuratObject(counts = expr_matrix, meta.data = metadata)
+
   # Test missing hiddenFactors
   expect_error(
-    FitRBM(list(), visibleFeatures = NULL),
+    FitRBM(seurat_obj, visibleFeatures = NULL, hiddenFactors = NULL),
     "hiddenFactors must be specified"
   )
 })
@@ -136,16 +145,27 @@ test_that("predict.RBM validates input correctly", {
   # Create a mock RBM object
   rbm <- structure(
     list(
-      weights = matrix(rnorm(20), nrow = 10, ncol = 2,
-                      dimnames = list(paste0("Gene", 1:10), c("Factor1", "Factor2"))),
+      weights_per_layer = list(
+        Factor1 = matrix(rnorm(10 * 1), nrow = 10, ncol = 1,
+                         dimnames = list(paste0("Gene", 1:10), "u1")),
+        Factor2 = matrix(rnorm(10 * 1), nrow = 10, ncol = 1,
+                         dimnames = list(paste0("Gene", 1:10), "u1"))
+      ),
       visible_bias = setNames(rnorm(10), paste0("Gene", 1:10)),
-      hidden_bias = setNames(rnorm(2), c("Factor1", "Factor2")),
+      hidden_bias_per_layer = list(
+        Factor1 = setNames(rnorm(1), "u1"),
+        Factor2 = setNames(rnorm(1), "u1")
+      ),
       partial_correlations = matrix(0, nrow = 10, ncol = 10),
       visible_features = paste0("Gene", 1:10),
       hidden_factors = c("Factor1", "Factor2"),
       family = "zinb",
       metadata = data.frame(Factor1 = 1:5, Factor2 = 1:5),
-      fit_info = list(n_features = 10, n_hidden = 2)
+      hidden_layers_info = list(
+        Factor1 = list(type = "binary"),
+        Factor2 = list(type = "binary")
+      ),
+      fit_info = list(n_features = 10)
     ),
     class = "RBM"
   )
@@ -172,7 +192,7 @@ test_that("predict.RBM validates input correctly", {
   # Test valid prediction
   predictions <- predict(rbm, newdata = new_expr, type = "activation")
   expect_true(is.matrix(predictions))
-  expect_equal(ncol(predictions), 2)  # 2 hidden factors
+  expect_equal(ncol(predictions), 2)  # 2 hidden layers (1 unit each)
   expect_equal(nrow(predictions), 5)  # 5 observations
 })
 
@@ -181,16 +201,25 @@ test_that("ReconstructRBM works correctly", {
   # Create a mock RBM object
   rbm <- structure(
     list(
-      weights = matrix(rnorm(20), nrow = 10, ncol = 2,
-                      dimnames = list(paste0("Gene", 1:10), c("Factor1", "Factor2"))),
+      weights_per_layer = list(
+        Factor1 = matrix(rnorm(10 * 1), nrow = 10, ncol = 1,
+                         dimnames = list(paste0("Gene", 1:10), "u1")),
+        Factor2 = matrix(rnorm(10 * 1), nrow = 10, ncol = 1,
+                         dimnames = list(paste0("Gene", 1:10), "u1"))
+      ),
       visible_bias = setNames(rnorm(10), paste0("Gene", 1:10)),
-      hidden_bias = setNames(rnorm(2), c("Factor1", "Factor2")),
       partial_correlations = matrix(0, nrow = 10, ncol = 10),
       visible_features = paste0("Gene", 1:10),
       hidden_factors = c("Factor1", "Factor2"),
       family = "zinb",
       metadata = data.frame(Factor1 = c(1, 2, 1), Factor2 = c(2, 1, 2)),
-      fit_info = list(n_features = 10, n_hidden = 2)
+      hidden_layers_encoded = list(
+        Factor1 = matrix(c(0, 1, 0), nrow = 3, ncol = 1,
+                         dimnames = list(NULL, "u1")),
+        Factor2 = matrix(c(1, 0, 1), nrow = 3, ncol = 1,
+                         dimnames = list(NULL, "u1"))
+      ),
+      fit_info = list(n_features = 10)
     ),
     class = "RBM"
   )
@@ -202,8 +231,10 @@ test_that("ReconstructRBM works correctly", {
   expect_equal(nrow(reconstructed), 3)   # 3 observations from metadata
   
   # Test reconstruction from specific hidden values
-  hidden_vals <- matrix(c(1, 2), nrow = 1, ncol = 2,
-                       dimnames = list(NULL, c("Factor1", "Factor2")))
+  hidden_vals <- list(
+    Factor1 = matrix(1, nrow = 1, ncol = 1, dimnames = list(NULL, "u1")),
+    Factor2 = matrix(0, nrow = 1, ncol = 1, dimnames = list(NULL, "u1"))
+  )
   reconstructed_specific <- ReconstructRBM(rbm, hidden = hidden_vals)
   expect_true(is.matrix(reconstructed_specific))
   expect_equal(nrow(reconstructed_specific), 1)
@@ -213,6 +244,7 @@ test_that("ReconstructRBM works correctly", {
 
 test_that("PlotRBMHeatmap validates input correctly", {
   skip_if_not_installed("ComplexHeatmap")
+  skip_if_not_installed("circlize")
   
   # Create a mock RBM object
   rbm <- structure(
@@ -247,5 +279,45 @@ test_that("PlotRBMHeatmap validates input correctly", {
       cluster_columns = FALSE,
       color_palette = "RdBu"
     )
+  })
+})
+
+
+test_that("Heatmap entrypoints are safe-by-default", {
+  skip_if_not_installed("ComplexHeatmap")
+  skip_if_not_installed("circlize")
+
+  set.seed(1)
+  pcor <- cor(matrix(rnorm(100), nrow = 10))
+  rownames(pcor) <- paste0("Gene", 1:10)
+  colnames(pcor) <- paste0("Gene", 1:10)
+
+  weights_per_layer <- list(
+    Factor1 = matrix(rnorm(10 * 2), nrow = 10, ncol = 2, dimnames = list(paste0("Gene", 1:10), c("u1", "u2"))),
+    Factor2 = matrix(rnorm(10 * 1), nrow = 10, ncol = 1, dimnames = list(paste0("Gene", 1:10), "u1"))
+  )
+
+  rbm <- structure(
+    list(
+      weights_per_layer = weights_per_layer,
+      partial_correlations = pcor,
+      visible_features = paste0("Gene", 1:10),
+      hidden_factors = c("Factor1", "Factor2"),
+      hidden_layers_info = list(
+        Factor1 = list(type = "categorical"),
+        Factor2 = list(type = "binary")
+      )
+    ),
+    class = "RBM"
+  )
+
+  expect_no_error({
+    hm <- PlotPartialCorrelationHeatmap(rbm, nEdges = 5, cluster_rows = FALSE, cluster_columns = FALSE)
+    expect_true(nrow(hm@matrix) <= 10)
+  })
+
+  expect_no_error({
+    wm <- PlotRBMWeightsHeatmap(rbm, nFeatures = 4, cluster_rows = FALSE, cluster_columns = FALSE)
+    expect_true(nrow(wm@matrix) <= 4)
   })
 })
