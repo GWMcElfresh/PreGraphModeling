@@ -1,0 +1,256 @@
+---
+title: "Per-Gene ZINB Modeling for Single-Cell Analysis"
+author: "PreGraphModeling"
+date: "`r Sys.Date()`"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Per-Gene ZINB Modeling for Single-Cell Analysis}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.width = 7,
+  fig.height = 5
+)
+```
+
+## Introduction
+
+This vignette demonstrates how to use PreGraphModeling to fit zero-inflated negative binomial (ZINB) models to single-cell RNA-seq data. This approach estimates distribution parameters (mean, dispersion, zero-inflation) for each gene within cell subsets defined by metadata.
+
+**When to use this approach:**
+
+- Comparing gene expression distributions across conditions/cell types
+- Estimating per-gene parameters for downstream analysis
+- Characterizing zero-inflation patterns in scRNA-seq data
+
+## Key Features
+
+- **Subsetting**: Divide cells by metadata columns (e.g., cell type, treatment)
+- **ZINB Modeling**: Estimate μ, φ, and π parameters per gene
+- **Saturation Correction**: Residualize size factors against cellular saturation
+- **Parallel Processing**: Leverage multiple cores for large datasets
+- **Key-based Output**: Easy joining with external data
+
+## Basic Workflow
+
+### 1. Load Data
+
+```{r eval=FALSE}
+library(PreGraphModeling)
+library(Seurat)
+
+# Load your Seurat object
+pbmc <- readRDS("pbmc3k.rds")
+```
+
+### 2. Quick Analysis with AnalyzeWithZINB
+
+The `AnalyzeWithZINB()` function combines subsetting and modeling in one step:
+
+```{r eval=FALSE}
+# Analyze by cell type with parallel processing
+result <- AnalyzeWithZINB(
+  seuratObject = pbmc,
+  groupByColumns = "CellType",
+  parallel = TRUE,
+  verbose = TRUE
+)
+
+# View results
+head(result$combined_parameters)
+```
+
+### 3. Multi-Column Subsetting
+
+Create fine-grained subsets using multiple metadata columns:
+  
+```{r eval=FALSE}
+# Subset by CellType AND Treatment
+# Creates subsets: TypeA_Control, TypeA_Treatment, TypeB_Control, etc.
+result <- AnalyzeWithZINB(
+  seuratObject = pbmc,
+  groupByColumns = c("CellType", "Treatment"),
+  parallel = TRUE
+)
+
+# Each subset has its own ZINB parameters
+names(result$model_parameters)
+```
+
+## ZINB Model Parameters
+
+The ZINB distribution models count data with:
+
+| Parameter | Description | Interpretation |
+|-----------|-------------|----------------|
+| **μ (mu)** | Mean of negative binomial | Average expression level |
+| **φ (phi)** | Dispersion (theta) | Variance = μ + μ²/φ |
+| **π (pi)** | Zero-inflation probability | Fraction of "dropout" zeros |
+
+```{r eval=FALSE}
+# Access parameters for one subset
+params <- result$model_parameters[["Tcell_Control"]]
+head(params)
+#   gene      mu     phi       pi converged n_nonzero n_datapoints
+# 1 CD3D  15.23   3.12    0.12      TRUE        45           50
+# 2 CD4    8.91   2.34    0.18      TRUE        40           50
+```
+
+## Saturation Correction
+
+scRNA-seq data often shows saturation effects. PreGraphModeling can residualize size factors against cellular saturation:
+
+```{r eval=FALSE}
+# Use default saturation column (Saturation.RNA)
+result <- AnalyzeWithZINB(
+  seuratObject = pbmc,
+  groupByColumns = "CellType",
+  saturationColumn = "Saturation.RNA"
+)
+
+# Use a different technical covariate
+result <- AnalyzeWithZINB(
+  seuratObject = pbmc,
+  groupByColumns = "CellType",
+  saturationColumn = "percent.mt"
+)
+
+# Disable saturation correction
+result <- AnalyzeWithZINB(
+  seuratObject = pbmc,
+  groupByColumns = "CellType",
+  saturationColumn = NULL
+)
+```
+
+## Step-by-Step Workflow
+
+For more control, use individual functions:
+
+### Step 1: Subset
+
+```{r eval=FALSE}
+# Subset by metadata
+subset_result <- SubsetSeurat(
+  seuratObject = pbmc,
+  groupByColumns = c("CellType", "Treatment"),
+  assay = "RNA",
+  layer = "counts",
+  saturationColumn = "Saturation.RNA"
+)
+
+# Access subsets
+names(subset_result$subset_matrices)
+```
+
+### Step 2: Fit Models
+
+```{r eval=FALSE}
+# Fit ZINB models to one subset
+params <- FitZeroInflatedModels(
+  expressionMatrix = subset_result$subset_matrices[["Tcell_Control"]],
+  cellSaturation = subset_result$saturation_vectors[["Tcell_Control"]],
+  geneSubset = c("CD3D", "CD4", "CD8A"),  # Optional: specific genes
+  minNonZero = 3,
+  verbose = TRUE
+)
+```
+
+## Parallel Processing
+
+For large datasets, enable parallel processing:
+
+```{r eval=FALSE}
+# Auto-detect workers
+result <- AnalyzeWithZINB(
+  seuratObject = pbmc,
+  groupByColumns = "CellType",
+  parallel = TRUE
+)
+
+# Specify workers and plan
+result <- AnalyzeWithZINB(
+  seuratObject = pbmc,
+  groupByColumns = "CellType",
+  parallel = TRUE,
+  numWorkers = 4,
+  parallelPlan = "multisession"  # Options: multisession, multicore, cluster
+)
+```
+
+## Working with Keys
+
+The output includes keys for easy downstream analysis:
+
+```{r eval=FALSE}
+# View combined output with keys
+head(result$combined_parameters)
+#   gene   mu  phi   pi converged n_nonzero n_datapoints         key       key_colnames
+# 1 CD3D 15.2 3.12 0.12     TRUE        45           50 Tcell_Control CellType|Treatment
+
+# Filter to specific gene
+cd3d_data <- result$combined_parameters[result$combined_parameters$gene == "CD3D", ]
+
+# Join with external data
+external <- data.frame(
+  key = c("Tcell_Control", "Tcell_Treatment"),
+  condition_label = c("T-Ctrl", "T-Trt")
+)
+merged <- merge(cd3d_data, external, by = "key")
+```
+
+## Timing Information
+
+Track performance with timing data:
+
+```{r eval=FALSE}
+print(result$timing)
+#            step elapsed_seconds
+# 1    Subsetting            0.15
+# 2 Model Fitting            2.35
+# 3  Data Merging            0.08
+```
+
+## Complete Example
+
+```{r eval=FALSE}
+library(PreGraphModeling)
+library(Seurat)
+
+# Load data
+pbmc <- readRDS("pbmc3k.rds")
+
+# Define genes of interest
+marker_genes <- c("CD3D", "CD4", "CD8A", "CD19", "MS4A1", "CD14", "LYZ")
+
+# Run complete analysis
+result <- AnalyzeWithZINB(
+  seuratObject = pbmc,
+  groupByColumns = c("CellType", "Sample"),
+  geneSubset = marker_genes,
+  minNonZero = 5,
+  parallel = TRUE,
+  numWorkers = 4,
+  verbose = TRUE
+)
+
+# Summary
+message(sprintf("Analyzed %d genes across %d subsets",
+               length(unique(result$combined_parameters$gene)),
+               length(result$subset_matrices)))
+
+# Export results
+write.csv(result$combined_parameters, "zinb_parameters.csv", row.names = FALSE)
+```
+
+## See Also
+
+- `?SubsetSeurat` - Subset Seurat objects
+- `?FitZeroInflatedModels` - Fit ZINB models
+- `?AnalyzeWithZINB` - Complete pipeline
+- `vignette("rbm_analysis")` - RBM approach for feature-metadata modeling
