@@ -14,7 +14,7 @@
 #'
 #' @return A list with three elements:
 #'   \itemize{
-#'     \item subset_matrices: A list of expression matrices, one per unique metadata combination
+#'     \item subset_matrices: A list of expression matrices (sparse `dgCMatrix`), one per unique metadata combination
 #'     \item group_metadata: A data frame containing the metadata for each subset
 #'     \item saturation_vectors: A list of numeric vectors containing saturation values for each subset (only if saturationColumn is provided)
 #'   }
@@ -79,6 +79,15 @@ SubsetSeurat <- function(seuratObject,
     expr_data <- SeuratObject::GetAssayData(seuratObject, layer = layer)
   }
 
+  # Ensure sparse representation to avoid downstream coercion warnings and
+  # accidental densification for scRNA-seq-sized objects.
+  if (!inherits(expr_data, "Matrix")) {
+    expr_data <- tryCatch(
+      Matrix::Matrix(expr_data, sparse = TRUE),
+      error = function(e) Matrix::Matrix(as.matrix(expr_data), sparse = TRUE)
+    )
+  }
+
   # Create grouping factor by combining all specified columns
   if (length(groupByColumns) == 1) {
     group_factor <- gsub("_", ".", as.character(metadata[[groupByColumns[1]]]), fixed = TRUE)
@@ -101,7 +110,7 @@ SubsetSeurat <- function(seuratObject,
     group_cells <- which(group_factor == group_name)
 
     # Extract subset of cells for this group
-    subset_matrices[[group_name]] <- as.matrix(expr_data[, group_cells, drop = FALSE])
+    subset_matrices[[group_name]] <- expr_data[, group_cells, drop = FALSE]
 
     # Extract saturation values if requested
     if (!is.null(saturationColumn)) {

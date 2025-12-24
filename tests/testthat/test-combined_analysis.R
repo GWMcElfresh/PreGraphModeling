@@ -27,7 +27,7 @@ test_that("AnalyzeWithZINB integrates subsetting and modeling", {
 
   # Create SeuratObject
   seurat_obj <- SeuratObject::CreateSeuratObject(
-    counts = expr_matrix,
+    counts = Matrix::Matrix(expr_matrix, sparse = TRUE),
     meta.data = metadata
   )
 
@@ -98,7 +98,7 @@ test_that("AnalyzeWithZINB works with multiple grouping columns", {
 
   # Create SeuratObject
   seurat_obj <- SeuratObject::CreateSeuratObject(
-    counts = expr_matrix,
+    counts = Matrix::Matrix(expr_matrix, sparse = TRUE),
     meta.data = metadata
   )
 
@@ -141,7 +141,7 @@ test_that("AnalyzeWithZINB respects gene subset parameter", {
 
   # Create SeuratObject
   seurat_obj <- SeuratObject::CreateSeuratObject(
-    counts = expr_matrix,
+    counts = Matrix::Matrix(expr_matrix, sparse = TRUE),
     meta.data = metadata
   )
 
@@ -193,7 +193,7 @@ test_that("AnalyzeWithZINB propagates parameters correctly", {
 
   # Create SeuratObject
   seurat_obj <- SeuratObject::CreateSeuratObject(
-    counts = expr_matrix,
+    counts = Matrix::Matrix(expr_matrix, sparse = TRUE),
     meta.data = metadata
   )
 
@@ -241,7 +241,7 @@ test_that("AnalyzeWithZINB creates proper keys and key_colnames", {
 
   # Create SeuratObject
   seurat_obj <- SeuratObject::CreateSeuratObject(
-    counts = expr_matrix,
+    counts = Matrix::Matrix(expr_matrix, sparse = TRUE),
     meta.data = metadata
   )
 
@@ -294,7 +294,7 @@ test_that("AnalyzeWithZINB parallel processing works", {
 
   # Create SeuratObject
   seurat_obj <- SeuratObject::CreateSeuratObject(
-    counts = expr_matrix,
+    counts = Matrix::Matrix(expr_matrix, sparse = TRUE),
     meta.data = metadata
   )
 
@@ -336,7 +336,7 @@ test_that("AnalyzeWithZINB accepts parallelPlan parameter", {
   )
 
   seurat_obj <- SeuratObject::CreateSeuratObject(
-    counts = expr_matrix,
+    counts = Matrix::Matrix(expr_matrix, sparse = TRUE),
     meta.data = metadata
   )
 

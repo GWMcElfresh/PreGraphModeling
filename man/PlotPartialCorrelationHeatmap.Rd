@@ -44,7 +44,7 @@ Options: "RdBu", "viridis", "plasma", "RdYlBu" (default: "RdBu").}
 
 \item{title}{Character string for heatmap title (default: "RBM Partial Correlations").}
 
-\item{name}{Character string for color legend name (default: "Partial\nCorrelation").}
+\item{name}{Character string for color legend name (default: "Partial\\nCorrelation").}
 
 \item{...}{Additional arguments passed to ComplexHeatmap::Heatmap().}
 }

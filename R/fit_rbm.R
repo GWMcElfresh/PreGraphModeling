@@ -174,27 +174,23 @@ FitRBM <- function(seuratObject,
   # Get expression matrix
   if (inherits(seuratObject, "Seurat")) {
     # For Seurat v5+ with layers
-    if (requireNamespace("SeuratObject", quietly = TRUE)) {
-      tryCatch(
-        {
-          expr_matrix <- SeuratObject::LayerData(
-            object = seuratObject,
-            assay = assay,
-            layer = layer
-          )
-        },
-        error = function(e) {
-          # Fallback for older Seurat versions
-          expr_matrix <<- SeuratObject::GetAssayData(
-            object = seuratObject,
-            assay = assay,
-            layer = layer
-          )
-        }
-      )
-    } else {
-      stop("SeuratObject package required but not available")
-    }
+    tryCatch(
+      {
+        expr_matrix <- SeuratObject::LayerData(
+          object = seuratObject,
+          assay = assay,
+          layer = layer
+        )
+      },
+      error = function(e) {
+        # Fallback for older Seurat versions
+        expr_matrix <<- SeuratObject::GetAssayData(
+          object = seuratObject,
+          assay = assay,
+          layer = layer
+        )
+      }
+    )
   } else {
     # For SeuratObject
     expr_matrix <- SeuratObject::GetAssayData(
@@ -396,7 +392,7 @@ FitRBM <- function(seuratObject,
   features_with_na_weights <- character(0)
 
   # Setup progress tracking
-  if (progressr && requireNamespace("progressr", quietly = TRUE)) {
+  if (progressr) {
     progressr::handlers(global = TRUE)
     p <- progressr::progressor(steps = length(valid_features) * length(hiddenFactors))
   } else {

@@ -25,7 +25,7 @@
 #' b_layer is the hidden bias for that layer, and activation_function depends on the
 #' metadata type (sigmoid for binary, softmax for categorical, linear for continuous/ordinal).
 #'
-#' For binary layers, the returned value can be interpreted as $P(h=1\mid v)$.
+#' For binary layers, the returned value can be interpreted as \eqn{P(h=1 | v)}.
 #' For categorical layers, each row is a probability vector over levels (rows sum to 1).
 #' For continuous/ordinal layers, the output is a score on the model's internal scale and
 #' is not a calibrated likelihood.
@@ -56,8 +56,8 @@ predict.RBM <- function(object, newdata = NULL, type = "activation",
   }
   
   # Validate newdata format
-  if (!is.matrix(newdata) && !is.data.frame(newdata)) {
-    stop("newdata must be a matrix or data frame")
+  if (!is.matrix(newdata) && !is.data.frame(newdata) && !inherits(newdata, "Matrix")) {
+    stop("newdata must be a matrix, Matrix, or data frame")
   }
   
   # Convert to matrix if needed
@@ -85,7 +85,7 @@ predict.RBM <- function(object, newdata = NULL, type = "activation",
   
   # Extract expression for common features
   expr_data <- newdata[common_features, , drop = FALSE]
-  n_obs <- ncol(expr_data)
+  
   
   # ============================================================================
   # COMPUTE HIDDEN ACTIVATIONS FOR EACH LAYER
