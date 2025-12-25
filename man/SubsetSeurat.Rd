@@ -28,7 +28,7 @@ cellular saturation values. If NULL, no saturation data is extracted (default: N
 \value{
 A list with three elements:
   \itemize{
-    \item subset_matrices: A list of expression matrices, one per unique metadata combination
+    \item subset_matrices: A list of expression matrices (sparse `dgCMatrix`), one per unique metadata combination
     \item group_metadata: A data frame containing the metadata for each subset
     \item saturation_vectors: A list of numeric vectors containing saturation values for each subset (only if saturationColumn is provided)
   }

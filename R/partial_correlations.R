@@ -239,7 +239,7 @@ EstimatePartialCorrelations <- function(expressionMatrix,
   # Precompute size factors (needed for all features)
   lib_sizes <- colSums(expr_matrix)
   size_factors <- lib_sizes / mean(lib_sizes)
-  log_size_factors <- log(size_factors)
+  log_size_factors <- log(pmax(size_factors, 1e-8))
 
   # Define function to compute residuals for a single feature
   .compute_zinb_residuals <- function(i, expr_matrix, log_size_factors, metadata) {
@@ -264,17 +264,12 @@ EstimatePartialCorrelations <- function(expressionMatrix,
         }
 
         # Fit ZINB model
-        if (requireNamespace("pscl", quietly = TRUE)) {
-          fit <- pscl::zeroinfl(as.formula(formula_str),
-            data = model_data,
-            dist = "negbin",
-            link = "logit"
-          )
-          return(residuals(fit, type = "deviance"))
-        } else {
-          # Fallback: use Pearson residuals from simple model
-          return((gene_expr - mean(gene_expr)) / sqrt(mean(gene_expr) + 1e-6))
-        }
+        fit <- pscl::zeroinfl(as.formula(formula_str),
+          data = model_data,
+          dist = "negbin",
+          link = "logit"
+        )
+        return(residuals(fit, type = "deviance"))
       },
       error = function(e) {
         # Use simple residuals if ZINB fit fails
@@ -284,8 +279,7 @@ EstimatePartialCorrelations <- function(expressionMatrix,
   }
 
   # Parallel or sequential execution
-  if (parallel && requireNamespace("future", quietly = TRUE) &&
-    requireNamespace("future.apply", quietly = TRUE)) {
+  if (parallel) {
     # Set up parallel workers
     if (is.null(numWorkers)) {
       numWorkers <- max(1, parallel::detectCores() - 1)
@@ -300,7 +294,7 @@ EstimatePartialCorrelations <- function(expressionMatrix,
     future::plan(future::multisession, workers = numWorkers)
 
     # Setup progress tracking for parallel
-    if (progressr && requireNamespace("progressr", quietly = TRUE)) {
+    if (progressr) {
       progressr::handlers(global = TRUE)
       p <- progressr::progressor(steps = n_features)
     } else {
@@ -327,7 +321,7 @@ EstimatePartialCorrelations <- function(expressionMatrix,
     future::plan(old_plan)
   } else {
     # Sequential execution with progress tracking
-    if (progressr && requireNamespace("progressr", quietly = TRUE)) {
+    if (progressr) {
       progressr::handlers(global = TRUE)
       p <- progressr::progressor(steps = n_features)
     } else {
@@ -453,8 +447,7 @@ EstimatePartialCorrelations <- function(expressionMatrix,
   }
 
   # Parallel or sequential execution
-  if (parallel && requireNamespace("future", quietly = TRUE) &&
-    requireNamespace("future.apply", quietly = TRUE)) {
+  if (parallel) {
     # Set up parallel workers
     if (is.null(numWorkers)) {
       numWorkers <- max(1, parallel::detectCores() - 1)
@@ -469,7 +462,7 @@ EstimatePartialCorrelations <- function(expressionMatrix,
     future::plan(future::multisession, workers = numWorkers)
 
     # Setup progress tracking for parallel
-    if (progressr && requireNamespace("progressr", quietly = TRUE)) {
+    if (progressr) {
       progressr::handlers(global = TRUE)
       p <- progressr::progressor(steps = n_features)
     } else {
@@ -496,7 +489,7 @@ EstimatePartialCorrelations <- function(expressionMatrix,
     future::plan(old_plan)
   } else {
     # Sequential execution with progress tracking
-    if (progressr && requireNamespace("progressr", quietly = TRUE)) {
+    if (progressr) {
       progressr::handlers(global = TRUE)
       p <- progressr::progressor(steps = n_features)
     } else {
@@ -715,27 +708,23 @@ EstimatePartialCorrelationsFromSeurat <- function(seuratObject,
   # Get expression matrix
   if (inherits(seuratObject, "Seurat")) {
     # For Seurat v5+ with layers
-    if (requireNamespace("SeuratObject", quietly = TRUE)) {
-      tryCatch(
-        {
-          expr_matrix <- SeuratObject::LayerData(
-            object = seuratObject,
-            assay = assay,
-            layer = layer
-          )
-        },
-        error = function(e) {
-          # Fallback for older Seurat versions
-          expr_matrix <<- SeuratObject::GetAssayData(
-            object = seuratObject,
-            assay = assay,
-            layer = layer
-          )
-        }
-      )
-    } else {
-      stop("SeuratObject package required but not available")
-    }
+    tryCatch(
+      {
+        expr_matrix <- SeuratObject::LayerData(
+          object = seuratObject,
+          assay = assay,
+          layer = layer
+        )
+      },
+      error = function(e) {
+        # Fallback for older Seurat versions
+        expr_matrix <<- SeuratObject::GetAssayData(
+          object = seuratObject,
+          assay = assay,
+          layer = layer
+        )
+      }
+    )
   } else {
     # For SeuratObject
     expr_matrix <- SeuratObject::GetAssayData(

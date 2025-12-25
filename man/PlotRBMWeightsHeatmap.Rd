@@ -28,6 +28,10 @@ If NULL, plots all features (default: NULL).}
 \item{factors}{Optional character vector of specific hidden factors to plot.
 If NULL, plots all factors (default: NULL).}
 
+\item{nFeatures}{Integer. If `features` is NULL, select approximately this many
+visible features to display by splitting the budget across the selected factors
+(default: 50).}
+
 \item{cluster_rows}{Logical indicating whether to cluster rows (default: TRUE).}
 
 \item{cluster_columns}{Logical indicating whether to cluster columns (default: FALSE).}

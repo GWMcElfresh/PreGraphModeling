@@ -17,6 +17,8 @@ Depends:
     R (>= 4.0.0)
 Imports:
     SeuratObject,
+    SeuratData,
+    Matrix,
     pscl,
     methods,
     parallel,
@@ -25,19 +27,18 @@ Imports:
     stats,
     grDevices,
     grid,
+    progressr,
     future,
-    future.apply
+    future.apply,
+    igraph,
+    ComplexHeatmap,
+    circlize,
+    viridisLite
 Suggests:
     testthat (>= 3.0.0),
     Seurat,
     HDF5Array,
     DelayedArray, 
-    Matrix,
-    progressr,
-    igraph,
-    ComplexHeatmap,
-    circlize,
-    viridisLite,
     knitr,
     rmarkdown
 Config/testthat/edition: 3

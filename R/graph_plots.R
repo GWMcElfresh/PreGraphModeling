@@ -29,9 +29,6 @@ PlotPartialCorrelationGraph <- function(rbmObject,
   if (!inherits(rbmObject, "RBM")) {
     stop("rbmObject must be an RBM object created by FitRBM()")
   }
-  if (!requireNamespace("igraph", quietly = TRUE)) {
-    stop("Package 'igraph' is required. Install it with: install.packages('igraph')")
-  }
 
   layout <- match.arg(layout)
 
@@ -136,9 +133,6 @@ PlotRBMLayerGraph <- function(rbmObject,
                               ...) {
   if (!inherits(rbmObject, "RBM")) {
     stop("rbmObject must be an RBM object created by FitRBM()")
-  }
-  if (!requireNamespace("igraph", quietly = TRUE)) {
-    stop("Package 'igraph' is required. Install it with: install.packages('igraph')")
   }
 
   factors_to_plot <- if (is.null(factors)) rbmObject$hidden_factors else factors

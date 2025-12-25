@@ -143,7 +143,7 @@
 #' @param color_palette Character string specifying color palette.
 #'   Options: "RdBu", "viridis", "plasma", "RdYlBu" (default: "RdBu").
 #' @param title Character string for heatmap title (default: "RBM Partial Correlations").
-#' @param name Character string for color legend name (default: "Partial\nCorrelation").
+#' @param name Character string for color legend name (default: "Partial\\nCorrelation").
 #' @param ... Additional arguments passed to ComplexHeatmap::Heatmap().
 #'
 #' @return A ComplexHeatmap object that can be drawn or further customized.
@@ -198,16 +198,6 @@ PlotPartialCorrelationHeatmap <- function(rbmObject,
     stop("rbmObject must be an RBM object created by FitRBM()")
   }
   
-  if (!requireNamespace("ComplexHeatmap", quietly = TRUE)) {
-    stop("Package 'ComplexHeatmap' is required for this function. ",
-         "Install it with: BiocManager::install('ComplexHeatmap')")
-  }
-
-  if (!requireNamespace("circlize", quietly = TRUE)) {
-    stop("Package 'circlize' is required for this function. ",
-         "Install it with: BiocManager::install('circlize')")
-  }
-  
   # Extract partial correlation matrix
   pcor_matrix <- rbmObject$partial_correlations
 
@@ -258,34 +248,18 @@ PlotPartialCorrelationHeatmap <- function(rbmObject,
     )
   } else if (color_palette == "viridis") {
     # Viridis sequential
-    if (requireNamespace("viridisLite", quietly = TRUE)) {
-      colors <- viridisLite::viridis(100)
-      col_fun <- circlize::colorRamp2(
-        seq(min(cor_range, na.rm = TRUE), max(cor_range, na.rm = TRUE), length.out = 100),
-        colors
-      )
-    } else {
-      # Fallback to simple gradient
-      col_fun <- circlize::colorRamp2(
-        c(min(cor_range, na.rm = TRUE), max(cor_range, na.rm = TRUE)),
-        c("white", "darkblue")
-      )
-    }
+    colors <- viridisLite::viridis(100)
+    col_fun <- circlize::colorRamp2(
+      seq(min(cor_range, na.rm = TRUE), max(cor_range, na.rm = TRUE), length.out = 100),
+      colors
+    )
   } else if (color_palette == "plasma") {
     # Plasma sequential
-    if (requireNamespace("viridisLite", quietly = TRUE)) {
-      colors <- viridisLite::plasma(100)
-      col_fun <- circlize::colorRamp2(
-        seq(min(cor_range, na.rm = TRUE), max(cor_range, na.rm = TRUE), length.out = 100),
-        colors
-      )
-    } else {
-      # Fallback
-      col_fun <- circlize::colorRamp2(
-        c(min(cor_range, na.rm = TRUE), max(cor_range, na.rm = TRUE)),
-        c("white", "purple")
-      )
-    }
+    colors <- viridisLite::plasma(100)
+    col_fun <- circlize::colorRamp2(
+      seq(min(cor_range, na.rm = TRUE), max(cor_range, na.rm = TRUE), length.out = 100),
+      colors
+    )
   } else {
     warning(sprintf("Unknown color_palette '%s', using 'RdBu'", color_palette))
     col_fun <- circlize::colorRamp2(
@@ -377,6 +351,9 @@ PlotRBMHeatmap <- function(rbmObject,
 #'   If NULL, plots all features (default: NULL).
 #' @param factors Optional character vector of specific hidden factors to plot.
 #'   If NULL, plots all factors (default: NULL).
+#' @param nFeatures Integer. If `features` is NULL, select approximately this many
+#'   visible features to display by splitting the budget across the selected factors
+#'   (default: 50).
 #' @param cluster_rows Logical indicating whether to cluster rows (default: TRUE).
 #' @param cluster_columns Logical indicating whether to cluster columns (default: FALSE).
 #' @param show_row_names Logical indicating whether to show row names (default: TRUE).
@@ -429,14 +406,6 @@ PlotRBMWeightsHeatmap <- function(rbmObject,
   
   if (!inherits(rbmObject, "RBM")) {
     stop("rbmObject must be an RBM object created by FitRBM()")
-  }
-  
-  if (!requireNamespace("ComplexHeatmap", quietly = TRUE)) {
-    stop("Package 'ComplexHeatmap' is required. Install with: BiocManager::install('ComplexHeatmap')")
-  }
-
-  if (!requireNamespace("circlize", quietly = TRUE)) {
-    stop("Package 'circlize' is required. Install with: BiocManager::install('circlize')")
   }
   
   # Determine which factors to plot

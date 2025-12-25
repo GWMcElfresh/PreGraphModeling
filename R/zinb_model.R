@@ -120,22 +120,26 @@ FitZeroInflatedModels <- function(expressionMatrix,
   # Estimate size factors for each cell
   sizeFactors <- DESeq2::estimateSizeFactorsForMatrix(expressionMatrix, type = 'poscounts')
 
+  # Work on the log scale (this is what the model uses as an offset)
+  log_sizeFactors <- log(pmax(sizeFactors, 1e-8))
+
   # Residualize size factors against saturation if provided
   if (!is.null(cellSaturation)) {
     if (verbose) {
       message("Residualizing size factors against cellular saturation using GAM...")
     }
 
-    resid_result <- residualize_gam(y = sizeFactors, x = cellSaturation)
-    sizeFactors <- resid_result$residuals
+    original_log_sizeFactors <- log_sizeFactors
+    resid_result <- residualize_gam(y = log_sizeFactors, x = cellSaturation)
+    log_sizeFactors <- resid_result$residuals
 
-    # Handle any remaining NAs by using original size factors
-    na_idx <- is.na(sizeFactors)
+    # Handle any remaining NAs by using original log size factors
+    na_idx <- is.na(log_sizeFactors)
     if (any(na_idx)) {
       if (verbose) {
         message(sprintf("  Warning: %d cells had NA residuals, using original size factors", sum(na_idx)))
       }
-      sizeFactors[na_idx] <- DESeq2::estimateSizeFactorsForMatrix(expressionMatrix)[na_idx]
+      log_sizeFactors[na_idx] <- original_log_sizeFactors[na_idx]
     }
   }
 
@@ -177,7 +181,7 @@ FitZeroInflatedModels <- function(expressionMatrix,
     tryCatch({
       # Create data frame for modeling
       model_data <- data.frame(counts = gene_expr,
-                               log_sizeFactor = log(sizeFactors))
+                               log_sizeFactor = log_sizeFactors)
 
       # Fit zero-inflated negative binomial model
       fit <- pscl::zeroinfl(counts ~ offset(log_sizeFactor) | 1,

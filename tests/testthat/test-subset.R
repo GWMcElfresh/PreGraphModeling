@@ -22,7 +22,7 @@ test_that("SubsetSeurat works with single metadata column", {
   
   # Create SeuratObject
   seurat_obj <- SeuratObject::CreateSeuratObject(
-    counts = expr_matrix,
+    counts = Matrix::Matrix(expr_matrix, sparse = TRUE),
     meta.data = metadata
   )
   
@@ -39,7 +39,7 @@ test_that("SubsetSeurat works with single metadata column", {
   
   # Each subset should be a matrix with all genes and subset of cells
   for (subset_mat in result$subset_matrices) {
-    expect_true(is.matrix(subset_mat))
+    expect_true(inherits(subset_mat, "Matrix"))
     expect_equal(nrow(subset_mat), n_genes)
   }
   
@@ -77,7 +77,7 @@ test_that("SubsetSeurat works with multiple metadata columns", {
   
   # Create SeuratObject
   seurat_obj <- SeuratObject::CreateSeuratObject(
-    counts = expr_matrix,
+    counts = Matrix::Matrix(expr_matrix, sparse = TRUE),
     meta.data = metadata
   )
   
@@ -105,7 +105,10 @@ test_that("SubsetSeurat validates input correctly", {
   expr_matrix <- matrix(1:100, nrow = 10, ncol = 10,
                        dimnames = list(paste0("Gene", 1:10), paste0("Cell", 1:10)))
   metadata <- data.frame(CellType = rep("TypeA", 10), row.names = colnames(expr_matrix))
-  seurat_obj <- SeuratObject::CreateSeuratObject(counts = expr_matrix, meta.data = metadata)
+  seurat_obj <- SeuratObject::CreateSeuratObject(
+    counts = Matrix::Matrix(expr_matrix, sparse = TRUE),
+    meta.data = metadata
+  )
   
   expect_error(
     SubsetSeurat(seurat_obj, groupByColumns = character(0)),
@@ -143,7 +146,10 @@ test_that("SubsetSeurat subsets cells correctly", {
     row.names = colnames(expr_matrix)
   )
   
-  seurat_obj <- SeuratObject::CreateSeuratObject(counts = expr_matrix, meta.data = metadata)
+  seurat_obj <- SeuratObject::CreateSeuratObject(
+    counts = Matrix::Matrix(expr_matrix, sparse = TRUE),
+    meta.data = metadata
+  )
   result <- SubsetSeurat(seurat_obj, groupByColumns = "Group")
   
   # Verify subsets contain the right cells
@@ -184,7 +190,7 @@ test_that("SubsetSeurat extracts saturation values correctly", {
   
   # Create SeuratObject
   seurat_obj <- SeuratObject::CreateSeuratObject(
-    counts = expr_matrix,
+    counts = Matrix::Matrix(expr_matrix, sparse = TRUE),
     meta.data = metadata
   )
   
@@ -239,7 +245,7 @@ test_that("SubsetSeurat validates saturation column", {
   )
   
   seurat_obj <- SeuratObject::CreateSeuratObject(
-    counts = expr_matrix,
+    counts = Matrix::Matrix(expr_matrix, sparse = TRUE),
     meta.data = metadata
   )
   

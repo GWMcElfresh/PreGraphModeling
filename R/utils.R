@@ -39,9 +39,6 @@ residualize_gam <- function(y, x,
                             ...) {
   if (!is.numeric(y) || !is.numeric(x)) stop("y and x must be numeric")
   if (length(y) != length(x)) stop("y and x must have the same length")
-  if (!requireNamespace("mgcv", quietly = TRUE)) {
-    stop("Install the 'mgcv' package: install.packages('mgcv')")
-  }
 
   idx <- which(!is.na(y) & !is.na(x))
   fitted_vals <- rep(NA_real_, length(y))
@@ -82,4 +79,8 @@ residualize_gam <- function(y, x,
 
   residuals <- y - fitted_vals
   list(residuals = residuals, fitted = fitted_vals, model = model)
+}
+
+.seuratdata_installed_datasets <- function() {
+  SeuratData::InstalledData()
 }
