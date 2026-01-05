@@ -1,0 +1,199 @@
+---
+title: "RBM Active Learning (pbmc3k)"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{RBM Active Learning (pbmc3k)}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  message = FALSE,
+  warning = FALSE
+)
+```
+
+This vignette demonstrates how to use PreGraphModeling's **active learning** utilities for an RBM.
+The goal is to score candidate cells by an *expected impact* proxy or *latent uncertainty*, then select a batch for follow-up.
+
+The two main entry points are:
+
+- `ScoreRBMActiveLearningCandidates()`
+- `SelectRBMActiveLearningCandidates()`
+
+## Using `pbmc3k` from SeuratData
+
+`pbmc3k` is a convenient reference dataset from **SeuratData**. It contains cell-type annotations in the metadata column `seurat_annotations`.
+
+Depending on your Seurat/SeuratObject versions, you may need to run `UpdateSeuratObject()` so that metadata columns can be accessed via `$` (e.g., `pbmc3k$seurat_annotations`).
+
+```{r seuratdata-pbmc3k, eval=FALSE}
+# Requires an internet connection the first time you install the dataset.
+# SeuratData is required to run this vignette example.
+
+# Install the pbmc3k dataset (only needed once)
+if (!"pbmc3k" %in% SeuratData::InstalledData()$Dataset) {
+  SeuratData::InstallData("pbmc3k")
+}
+
+# Load the dataset
+pbmc3k <- SeuratData::LoadData("pbmc3k")
+
+# Update the object for safe `$` metadata access across versions
+pbmc3k <- SeuratObject::UpdateSeuratObject(pbmc3k)
+
+# Confirm that the expected metadata exists
+table(pbmc3k$seurat_annotations)
+```
+
+## End-to-end active learning workflow
+
+Conceptually, an active-learning loop looks like:
+
+1. Fit an RBM (e.g., with `FitRBM()`), typically using a categorical hidden factor like `seurat_annotations`.
+2. Choose a set of candidate cells to consider labeling / re-labeling / targeted QC.
+3. Score candidates using a method such as:
+   - `method = "expected_gradient"` (fast proxy for expected parameter change)
+   - `method = "latent_entropy"` (latent uncertainty via hidden-layer conditional activation distributions)
+4. Select the top-scoring candidates as a batch.
+
+### Practical note about vignette execution
+
+To keep this vignette runnable without downloading large external datasets during build,
+we show *pbmc3k loading code* above (not executed), and we run a lightweight scoring example below.
+
+If you have `pbmc3k` installed, replace the simulated `candidate_expression` matrix with counts from `pbmc3k`.
+
+## Scoring candidates (runnable example)
+
+We load a pre-fit RBM object (trained previously on pbmc3k) if available as a vignette resource.
+If it is not present, the vignette will still render but will skip scoring.
+
+```{r load-prefit-rbm}
+rbm_path <- file.path("pbmc3k_rbm_model.rds")
+rbmObject <- if (file.exists(rbm_path)) readRDS(rbm_path) else NULL
+
+if (is.null(rbmObject)) {
+  cat("No pre-fit RBM model found at: ", rbm_path, "\n")
+}
+```
+
+```{r make-candidates}
+if (!is.null(rbmObject)) {
+  set.seed(1)
+
+  visible_features <- rbmObject$visible_features
+
+  # Create a small candidate expression matrix with the correct feature names.
+  # In real usage, you would typically use a counts matrix from pbmc3k:
+  #
+  # counts <- SeuratObject::GetAssayData(pbmc3k, slot = "counts")
+  # candidate_expression <- counts[visible_features, candidate_cells, drop = FALSE]
+
+  n_candidates <- 200
+
+  # Use a stable, positive rate per gene. This is only to make the vignette runnable.
+  gene_rate <- rep(5, length(visible_features))
+  names(gene_rate) <- visible_features
+
+  candidate_expression <- matrix(
+    stats::rpois(length(visible_features) * n_candidates, lambda = rep(gene_rate, n_candidates)),
+    nrow = length(visible_features),
+    ncol = n_candidates,
+    dimnames = list(visible_features, paste0("Candidate", seq_len(n_candidates)))
+  )
+}
+```
+
+### Score candidates
+
+```{r score-candidates}
+if (!is.null(rbmObject)) {
+  scores_entropy <- PreGraphModeling::ScoreRBMActiveLearningCandidates(
+    rbmObject = rbmObject,
+    candidateExpression = candidate_expression,
+    method = "latent_entropy",
+    aggregate = "sum",
+    transform = "log1p",
+    chunkSize = 1000,
+    parallel = FALSE,
+    progressr = FALSE,
+    verbose = FALSE
+  )
+
+  # Inspect top-scoring candidates
+  head(sort(scores_entropy, decreasing = TRUE), 10)
+}
+```
+
+### Select a batch
+
+```{r select-batch}
+if (!is.null(rbmObject)) {
+  selection <- PreGraphModeling::SelectRBMActiveLearningCandidates(
+    rbmObject = rbmObject,
+    candidateExpression = candidate_expression,
+    batchSize = 25,
+    method = "latent_entropy",
+    aggregate = "sum",
+    transform = "log1p",
+    parallel = FALSE,
+    progressr = FALSE,
+    verbose = FALSE
+  )
+
+  selection
+}
+```
+
+## Using `pbmc3k` as the candidate pool (recommended)
+
+Below is a typical pattern for using `pbmc3k` directly as the candidate pool.
+
+```{r pbmc3k-candidates, eval=FALSE}
+# Load pbmc3k (see earlier chunk)
+
+# Make sure the cell-type labels are present
+stopifnot("seurat_annotations" %in% colnames(pbmc3k@meta.data))
+
+# Candidate cells could be all cells, or a held-out subset
+candidate_cells <- colnames(pbmc3k)
+
+# Align features to RBM
+counts <- SeuratObject::GetAssayData(pbmc3k, slot = "counts")
+
+# Candidate expression must be features x candidates with rownames
+candidate_expression <- counts[rbmObject$visible_features, candidate_cells, drop = FALSE]
+
+scores <- PreGraphModeling::ScoreRBMActiveLearningCandidates(
+  rbmObject = rbmObject,
+  candidateExpression = candidate_expression,
+  method = "expected_gradient",  # or "latent_entropy"
+  aggregate = "sum",
+  transform = "log1p",
+  chunkSize = 1000,
+  parallel = TRUE,
+  numWorkers = 4,
+  progressr = TRUE,
+  verbose = TRUE
+)
+
+selected <- PreGraphModeling::SelectRBMActiveLearningCandidates(
+  rbmObject = rbmObject,
+  candidateExpression = candidate_expression,
+  batchSize = 100,
+  method = "expected_gradient",
+  aggregate = "sum",
+  transform = "log1p",
+  parallel = TRUE,
+  numWorkers = 4,
+  progressr = TRUE,
+  verbose = TRUE
+)
+
+selected$indices
+selected$scores
+```

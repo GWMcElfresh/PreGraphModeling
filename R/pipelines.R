@@ -116,15 +116,6 @@ AnalyzeWithZINB <- function(seuratObject,
   step2_start <- Sys.time()
 
   if (parallel) {
-    # Check if future package is available
-    if (!requireNamespace("future", quietly = TRUE) ||
-        !requireNamespace("future.apply", quietly = TRUE)) {
-      warning("Packages 'future' and 'future.apply' required for parallel processing. Falling back to sequential.")
-      parallel <- FALSE
-    }
-  }
-
-  if (parallel) {
     # Set up parallel processing
     if (is.null(numWorkers)) {
       numWorkers <- max(1, parallel::detectCores() - 1)

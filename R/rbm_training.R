@@ -177,7 +177,7 @@
   }
   
   # Setup progress tracking
-  if (progressr && requireNamespace("progressr", quietly = TRUE)) {
+  if (progressr) {
     p <- progressr::progressor(steps = n_epochs)
   } else {
     p <- NULL
