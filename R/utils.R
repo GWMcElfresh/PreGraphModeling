@@ -80,7 +80,3 @@ residualize_gam <- function(y, x,
   residuals <- y - fitted_vals
   list(residuals = residuals, fitted = fitted_vals, model = model)
 }
-
-.seuratdata_installed_datasets <- function() {
-  SeuratData::InstalledData()
-}
