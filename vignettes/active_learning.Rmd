@@ -32,7 +32,7 @@ Depending on your Seurat/SeuratObject versions, you may need to run `UpdateSeura
 
 ```{r seuratdata-pbmc3k, eval=FALSE}
 # Requires an internet connection the first time you install the dataset.
-# SeuratData is a required dependency of this package.
+# SeuratData is required to run this vignette example.
 
 # Install the pbmc3k dataset (only needed once)
 if (!"pbmc3k" %in% SeuratData::InstalledData()$Dataset) {
