@@ -51,3 +51,9 @@ rsconnect/
 # Package build artifacts
 *.tar.gz
 *.Rcheck/
+
+# C++ compiled objects
+src/*.o
+src/*.so
+src/*.dll
+

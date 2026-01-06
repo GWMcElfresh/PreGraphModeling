@@ -1,8 +1,9 @@
 # PreGraphModeling
 
-R package for single-cell RNA-seq analysis with two complementary approaches:
+R package for single-cell RNA-seq analysis with three complementary approaches:
 1. **Per-Gene ZINB Modeling** - Estimate zero-inflated negative binomial distribution parameters for each gene across cell subsets
 2. **Restricted Boltzmann Machine (RBM)** - Model relationships between gene expression features and cell metadata using partial correlations
+3. **CONGA (Conditional Nonparametric Graphical Analysis)** - Estimate conditional dependency graphs using Bayesian MCMC methods
 
 ## Installation
 
@@ -16,6 +17,9 @@ install.packages(c("progressr", "viridisLite"))
 
 # Optional: graph visualizations
 install.packages("igraph")
+
+# Required for CONGA
+install.packages(c("Rcpp", "RcppArmadillo", "mvtnorm", "combinat", "MCMCpack"))
 ```
 
 ---
@@ -199,6 +203,129 @@ rbm <- FitRBM(
 
 ---
 
+## Approach 3: CONGA (Conditional Graphical Models)
+
+This approach implements the CONGA algorithm for estimating conditional dependency graphs between genes using Bayesian MCMC methods with Dirichlet Process priors. Unlike correlation-based methods, CONGA models the full conditional probability structure and can handle count data directly.
+
+### Key Functions
+- `FitCONGA()` - Fit CONGA model to Seurat object (recommended)
+- `FitCONGAModel()` - Fit CONGA model to expression matrix
+- `ExtractCONGAGraph()` - Extract conditional dependency graph from MCMC samples
+- `ComputeCONGAROC()` - Compute ROC curve for evaluation (if true graph is known)
+
+### Quick Start
+
+```r
+library(PreGraphModeling)
+
+# Recommended: Use feature selection for computational efficiency
+library(Seurat)
+pbmc <- FindVariableFeatures(pbmc, nfeatures = 50)
+hvg <- VariableFeatures(pbmc)
+
+# Fit CONGA model (this may take 10-20 minutes)
+result <- FitCONGA(
+  seuratObject = pbmc,
+  geneSubset = hvg,
+  totalIterations = 5000,
+  burnIn = 2500,
+  verbose = TRUE
+)
+
+# Extract conditional dependency graph
+graph <- ExtractCONGAGraph(result, cutoff = 0.7)
+
+# View top edges
+print(graph)
+
+# Visualize adjacency matrix
+library(ComplexHeatmap)
+Heatmap(graph$adjacency_matrix, 
+        name = "Edge",
+        col = c("white", "black"))
+
+# Convert to igraph for network analysis
+library(igraph)
+g <- graph_from_adjacency_matrix(graph$adjacency_matrix, 
+                                  mode = "undirected")
+plot(g, vertex.size = 10, vertex.label.cex = 0.8)
+```
+
+### Features
+- Bayesian MCMC sampling with Dirichlet Process priors for uncertainty quantification
+- Handles count data directly (no normalization required)
+- Blocked Gibbs sampling for efficient mixing
+- Sparse graph estimation via horseshoe-like spike-and-slab priors
+- Power transformation to handle non-Gaussian structure
+- Posterior edge probabilities for graph construction
+
+### Important Notes
+
+**Computational Considerations:**
+- CONGA is computationally intensive: O(iterations × cells × genes²)
+- Recommended: Use feature selection (50-200 genes) for practical runtimes
+- Typical runtime: 10-30 minutes for 1000 cells × 50 genes with 5000 iterations
+
+**Implementation:**
+This implementation follows the original CONGA algorithm by Roy & Dunson:
+- Dirichlet Process clustering for lambda (Poisson intensities)
+- Blocked Gibbs sampling for beta (precision matrix elements)
+- Full likelihood computations with normalizing constants
+
+The algorithm provides rigorous Bayesian inference but requires:
+- Appropriate MCMC diagnostics (trace plots, Gelman-Rubin statistics)
+- Sufficient burn-in and iterations for convergence
+- Careful tuning of hyperparameters
+- Thorough convergence diagnostics
+
+### Detailed Example
+
+```r
+# Load data
+library(Seurat)
+data("pbmc_small")
+
+# Select genes of interest (keep it small for faster computation)
+genes <- c("CD3D", "CD4", "CD8A", "MS4A1", "CD14", 
+           "LYZ", "GNLY", "NKG7", "FCGR3A", "IL7R")
+
+# Fit CONGA
+result <- FitCONGA(
+  seuratObject = pbmc_small,
+  geneSubset = genes,
+  totalIterations = 2000,
+  burnIn = 1000,
+  lambdaShrinkage = 1,
+  verbose = TRUE
+)
+
+# Check acceptance rates (target 20-40% for good mixing)
+cat(sprintf("Lambda acceptance: %.1f%%\n", 
+            result$acceptance_rate_lambda * 100))
+cat(sprintf("Beta acceptance: %.1f%%\n", 
+            result$acceptance_rate_beta * 100))
+
+# Extract graph with different cutoffs
+graph_sparse <- ExtractCONGAGraph(result, cutoff = 0.9)  # Very sparse
+graph_medium <- ExtractCONGAGraph(result, cutoff = 0.7)  # Moderate
+graph_dense <- ExtractCONGAGraph(result, cutoff = 0.5)   # Less sparse
+
+# Compare edge counts
+cat(sprintf("Sparse: %d edges\n", graph_sparse$n_edges))
+cat(sprintf("Medium: %d edges\n", graph_medium$n_edges))
+cat(sprintf("Dense: %d edges\n", graph_dense$n_edges))
+
+# Examine specific edges
+edges_df <- graph_medium$edge_list
+edges_df <- edges_df[edges_df$included, ]
+edges_df <- edges_df[order(-edges_df$posterior_prob), ]
+head(edges_df)
+```
+
+> **See documentation:** `?FitCONGA` for complete details and mathematical formulation
+
+---
+
 ## Function Reference
 
 ### ZINB Modeling
@@ -223,6 +350,14 @@ rbm <- FitRBM(
 | `PlotRBMHeatmap()` | Backward-compatible wrapper for partial-correlation heatmap |
 | `PlotRBMWeights()` | Backward-compatible wrapper for weights heatmap |
 
+### CONGA Functionality
+| Function | Description |
+|----------|-------------|
+| `FitCONGA()` | Fit CONGA model to Seurat object (recommended) |
+| `FitCONGAModel()` | Fit CONGA model to expression matrix |
+| `ExtractCONGAGraph()` | Extract conditional dependency graph |
+| `ComputeCONGAROC()` | Compute ROC curve for evaluation |
+
 ---
 
 ## Requirements
@@ -230,11 +365,12 @@ rbm <- FitRBM(
 ### Required
 - R >= 4.0.0
 - SeuratObject, pscl, DESeq2, mgcv, future, future.apply
+- Rcpp, RcppArmadillo, mvtnorm, combinat, MCMCpack (for CONGA)
 
 ### Optional
 - Seurat (for full object support)
 - ComplexHeatmap, circlize, viridisLite (for RBM heatmaps)
-- igraph (for RBM graph visualizations)
+- igraph (for RBM and CONGA graph visualizations)
 - progressr (for progress tracking)
 
 ---
