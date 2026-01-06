@@ -4,64 +4,54 @@
 
 This document describes the implementation of the CONGA (Conditional Nonparametric Graphical Analysis) algorithm for the PreGraphModeling R package. CONGA is based on the work by Roy & Dunson for estimating conditional dependency graphs from count data using Bayesian MCMC methods.
 
-## Original Algorithm
+## Algorithm Components
 
-The original CONGA algorithm (https://github.com/royarkaprava/CONGA) includes:
+The CONGA algorithm (https://github.com/royarkaprava/CONGA) includes:
 
 1. **Dirichlet Process Prior on Lambda**: Allows clustering of cells with similar Poisson intensity patterns
 2. **Blocked Gibbs Sampling**: Updates entire rows/columns of the precision matrix at once
-3. **Complex Normalizing Constants**: Exact computation of partition functions
+3. **Normalizing Constants**: Computation of partition functions for likelihood evaluation
 4. **Horseshoe Priors**: Hierarchical spike-and-slab structure for sparsity
 
-## Implemented Simplifications
+## Implementation Details
 
-For computational tractability and ease of understanding, this implementation uses several simplifications:
+## Implementation Details
 
 ### 1. Lambda Updates (Poisson Intensities)
 
-**Original**: Dirichlet Process clustering with auxiliary variable method
-- Samples cluster assignments for each cell
-- Updates concentration parameter M
-- Complex likelihood computations with normalizing constants
-
-**Simplified**: Standard Metropolis-Hastings
-- Direct Gamma proposals for each lambda[i,j]
-- Simplified likelihood based on Poisson distribution
-- Approximate interaction terms with other genes
-- Much faster and more stable
+**Dirichlet Process Clustering with Auxiliary Variable Method**:
+- Samples cluster assignments for each cell using auxiliary variables
+- Updates concentration parameter M using Gamma distribution
+- Full likelihood computations with normalizing constants
+- Allows cells to share lambda values (clustering structure)
+- Handles heterogeneity in Poisson intensities across cells
 
 ### 2. Beta Updates (Precision Matrix)
 
-**Original**: Blocked Gibbs sampling
-- Updates entire row/column simultaneously
-- Complex multivariate normal proposals
-- Requires matrix inversions at each step
-
-**Simplified**: Element-wise Metropolis-Hastings
-- Updates one beta parameter at a time
-- Simple normal random walk proposals
-- Avoids numerical instability from matrix operations
-- Easier to tune and understand
+**Blocked Gibbs Sampling**:
+- Updates entire row/column of beta matrix simultaneously
+- Multivariate normal proposals based on conditional posterior
+- Requires matrix inversions at each step for proposal construction
+- Exploits conditional independence structure
+- More efficient mixing than element-wise updates
 
 ### 3. Likelihood Computations
 
-**Original**: Exact normalizing constants
+**Full Normalizing Constants**:
 - Computes: Z = sum_k dpois(k, lambda) * exp(lambda + beta_sum * atan(k)^power)
-- Requires C++ implementation for speed
-- Can be numerically unstable
-
-**Simplified**: Approximate likelihood
-- Uses subset of cells for speed (first 50 cells)
-- Focuses on pairwise interaction terms
-- Sufficient for MCMC mixing
+- C++ implementation for computational efficiency
+- Truncation at max_val=100 for practical computation
+- Necessary for proper posterior inference
 
 ## Implementation Files
 
 ### R/conga_fit.R
-- `FitCONGAModel()`: Core MCMC sampler
-- Implements simplified lambda and beta updates
-- Extensive documentation with uncertainty markers
-- ~450 lines with detailed comments
+- `FitCONGAModel()`: Core MCMC sampler with full Dirichlet Process and blocked Gibbs
+- Implements Dirichlet Process clustering for lambda updates
+- Implements blocked Gibbs sampling for beta updates
+- Full likelihood computations with normalizing constants
+- Extensive documentation with mathematical formulas
+- ~600 lines with detailed comments
 
 ### R/conga_wrapper.R
 - `FitCONGA()`: Seurat object wrapper
@@ -73,7 +63,7 @@ For computational tractability and ease of understanding, this implementation us
 ### src/conga_helpers.cpp
 - `SelectPowerParameter()`: C++ implementation for power parameter selection
 - `ComputeAtanMean()`: Expected value under Poisson distribution
-- `ComputeLogNormalizingConstant()`: Log partition function (for future use)
+- `ComputeLogNormalizingConstant()`: Log partition function for likelihood computation
 - ~160 lines with detailed comments
 
 ### tests/testthat/test-conga.R
@@ -98,8 +88,8 @@ log P(X[i,j] | X[i,-j], lambda, beta) ∝
 
 ### Priors
 ```
-lambda[i,j] ~ Gamma(alpha, beta)  [simplified from DP]
-beta[k] ~ N(0, sigma^2)           [spike-and-slab]
+lambda[,j] ~ DP(M, Gamma(alpha, beta))  [Dirichlet Process with Gamma base]
+beta[k] ~ N(0, tau^2 * phi_k * psi_k)    [Horseshoe-like hierarchical prior]
 ```
 
 ### Power Transformation
@@ -151,19 +141,19 @@ plot(g)
 
 ## Known Limitations
 
-1. **Not the Full CONGA Algorithm**: Simplified for tractability
-2. **May Require Longer Runs**: Due to simplified updates
-3. **Feature Selection Required**: Computational cost grows as O(genes^2)
-4. **No Automatic Tuning**: User must select appropriate parameters
-5. **Limited to Small-Medium Graphs**: Practical limit ~200 genes
+1. **Computational Intensity**: Full Dirichlet Process and blocked Gibbs are computationally expensive
+2. **Feature Selection Recommended**: Computational cost grows as O(genes^2)
+3. **No Automatic Tuning**: User must select appropriate MCMC parameters
+4. **Matrix Inversions**: Numerical stability considerations in blocked Gibbs updates
+5. **Practical Limits**: Best for small-medium graphs (~50-200 genes)
 
 ## Uncertainty Markers in Code
 
 Throughout the code, comments marked with "UNCERTAINTY NOTE:" highlight:
 - Heuristic methods (e.g., power parameter selection)
-- Approximations (e.g., likelihood computations)
-- Numerical stability concerns (e.g., matrix inversions)
-- Areas where the simplified algorithm differs from the original
+- Numerical stability concerns (e.g., matrix inversions in blocked Gibbs)
+- Approximations (e.g., normalizing constant truncation at max_val=100)
+- Convergence considerations for MCMC diagnostics
 
 ## Future Improvements
 
@@ -188,4 +178,4 @@ For questions or issues with the CONGA implementation:
 
 ---
 
-**Note**: This implementation prioritizes clarity, documentation, and computational tractability over exact replication of the original algorithm. Users should be aware of the simplifications and their potential impact on results.
+**Note**: This implementation follows the original CONGA algorithm by Roy & Dunson, including Dirichlet Process priors and blocked Gibbs sampling. The code emphasizes clarity with verbose variable names and extensive documentation of the mathematical formulation.

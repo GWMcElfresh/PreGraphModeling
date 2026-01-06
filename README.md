@@ -205,7 +205,7 @@ rbm <- FitRBM(
 
 ## Approach 3: CONGA (Conditional Graphical Models)
 
-This approach implements a simplified version of the CONGA algorithm for estimating conditional dependency graphs between genes using Bayesian MCMC methods. Unlike correlation-based methods, CONGA models the full conditional probability structure and can handle count data directly.
+This approach implements the CONGA algorithm for estimating conditional dependency graphs between genes using Bayesian MCMC methods with Dirichlet Process priors. Unlike correlation-based methods, CONGA models the full conditional probability structure and can handle count data directly.
 
 ### Key Functions
 - `FitCONGA()` - Fit CONGA model to Seurat object (recommended)
@@ -223,12 +223,12 @@ library(Seurat)
 pbmc <- FindVariableFeatures(pbmc, nfeatures = 50)
 hvg <- VariableFeatures(pbmc)
 
-# Fit CONGA model (this may take several minutes)
+# Fit CONGA model (this may take 10-20 minutes)
 result <- FitCONGA(
   seuratObject = pbmc,
   geneSubset = hvg,
-  totalIterations = 1000,
-  burnIn = 500,
+  totalIterations = 5000,
+  burnIn = 2500,
   verbose = TRUE
 )
 
@@ -252,9 +252,10 @@ plot(g, vertex.size = 10, vertex.label.cex = 0.8)
 ```
 
 ### Features
-- Bayesian MCMC sampling for uncertainty quantification
+- Bayesian MCMC sampling with Dirichlet Process priors for uncertainty quantification
 - Handles count data directly (no normalization required)
-- Sparse graph estimation via spike-and-slab priors
+- Blocked Gibbs sampling for efficient mixing
+- Sparse graph estimation via horseshoe-like spike-and-slab priors
 - Power transformation to handle non-Gaussian structure
 - Posterior edge probabilities for graph construction
 
@@ -263,17 +264,18 @@ plot(g, vertex.size = 10, vertex.label.cex = 0.8)
 **Computational Considerations:**
 - CONGA is computationally intensive: O(iterations × cells × genes²)
 - Recommended: Use feature selection (50-200 genes) for practical runtimes
-- Typical runtime: 5-15 minutes for 1000 cells × 50 genes with 1000 iterations
+- Typical runtime: 10-30 minutes for 1000 cells × 50 genes with 5000 iterations
 
 **Implementation:**
-This is a **simplified version** of the full CONGA algorithm for computational tractability:
-- Uses standard Metropolis-Hastings instead of Dirichlet Process clustering
-- Element-wise beta updates instead of blocked Gibbs sampling
-- Approximate likelihood computations
+This implementation follows the original CONGA algorithm by Roy & Dunson:
+- Dirichlet Process clustering for lambda (Poisson intensities)
+- Blocked Gibbs sampling for beta (precision matrix elements)
+- Full likelihood computations with normalizing constants
 
-These simplifications make the algorithm practical for real datasets but may require:
-- Longer MCMC runs for convergence
-- More careful tuning of parameters
+The algorithm provides rigorous Bayesian inference but requires:
+- Appropriate MCMC diagnostics (trace plots, Gelman-Rubin statistics)
+- Sufficient burn-in and iterations for convergence
+- Careful tuning of hyperparameters
 - Thorough convergence diagnostics
 
 ### Detailed Example
