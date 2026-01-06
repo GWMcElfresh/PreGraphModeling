@@ -8,7 +8,9 @@ Description: Tools for subsetting Seurat objects according to metadata columns a
     Supports residualization of technical covariates (e.g., cellular saturation) using 
     generalized additive models (GAM) to improve model fit quality. Includes restricted
     Boltzmann machine (RBM) functionality for connecting features to hidden layers
-    using partial correlations estimated via quasilikelihood.
+    using partial correlations estimated via quasilikelihood. Also includes CONGA
+    (Conditional Nonparametric Graphical Analysis) for estimating conditional dependency
+    graphs using Dirichlet Process mixtures and MCMC sampling.
 License: GPL-3 + file LICENSE
 Encoding: UTF-8
 LazyData: true
@@ -26,7 +28,12 @@ Imports:
     grDevices,
     grid,
     future,
-    future.apply
+    future.apply,
+    Rcpp,
+    RcppArmadillo,
+    mvtnorm,
+    combinat,
+    MCMCpack
 Suggests:
     testthat (>= 3.0.0),
     Seurat,
@@ -42,3 +49,6 @@ Suggests:
     rmarkdown
 Config/testthat/edition: 3
 VignetteBuilder: knitr
+LinkingTo: 
+    Rcpp,
+    RcppArmadillo
