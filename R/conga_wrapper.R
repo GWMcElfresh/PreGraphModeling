@@ -444,9 +444,16 @@ ComputeCONGAROC <- function(congaFit,
   # Consider non-zero entries as edges
   true_adjacency <- (trueGraph != 0) * 1
   
-  # Extract lower triangle (since graph is undirected)
+  # Extract edges using proper indexing
   edge_index <- congaFit$edge_index
-  true_edges <- true_adjacency[t(edge_index)]
+  n_edges <- ncol(edge_index)
+  true_edges <- numeric(n_edges)
+  
+  for (k in 1:n_edges) {
+    gene1 <- edge_index[1, k]
+    gene2 <- edge_index[2, k]
+    true_edges[k] <- true_adjacency[gene1, gene2]
+  }
   
   # ============================================================================
   # COMPUTE ROC CURVE

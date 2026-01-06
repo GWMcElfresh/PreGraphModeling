@@ -36,15 +36,24 @@ using namespace arma;
 //' @export
 // [[Rcpp::export]]
 double SelectPowerParameter(int po, const arma::mat& X) {
+  // Validate input
+  if (po <= 0) {
+    Rcpp::stop("po must be positive");
+  }
+  
+  // Cap the search range to prevent excessive memory allocation
+  // For very large counts, we don't need to test all the way to 2*po
+  int max_iterations = std::min(2 * po, 200);  // Cap at 200 iterations (power up to 20.0)
+  
   // Allocate vector to store test results for different power parameters
-  arma::vec test_results = arma::zeros(2 * po);
+  arma::vec test_results = arma::zeros(max_iterations);
   
   // Counter for consecutive increases in distance
   // Used to stop early if we've passed the minimum
   int consecutive_increases = 0;
   
-  // Test different power parameters from 0.1 to 2*po
-  for(int i = 0; i < (2 * po); i++){
+  // Test different power parameters from 0.1 to max_power
+  for(int i = 0; i < max_iterations; i++){
     // Current power parameter being tested
     double current_power = (i + 1) / 10.0;
     

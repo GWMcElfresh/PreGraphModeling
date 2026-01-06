@@ -64,6 +64,7 @@
 #' - **Convergence**: Longer runs may be needed compared to the full algorithm
 #' - **Acceptance rates**: Target 20-40% for good mixing
 #'
+#' @importFrom combinat combn
 #' @export
 #' @examples
 #' \dontrun{
@@ -361,10 +362,14 @@ FitCONGAModel <- function(expressionData,
       gene2 <- edge_index[2, beta_idx]
       
       # Compute contribution to likelihood from these two genes
+      # UNCERTAINTY NOTE: For computational efficiency, we sample a subset of cells
+      # The proportion sampled is min(50, n_cells), which may impact mixing for very large datasets
+      n_cells_sampled <- min(n_cells, 50)
+      
       log_lik_new <- 0
       log_lik_old <- 0
       
-      for (cell_i in 1:min(n_cells, 50)) {  # Sample subset of cells for speed
+      for (cell_i in 1:n_cells_sampled) {
         # Interaction term: beta * atan(X[i,gene1])^power * atan(X[i,gene2])^power
         atan_prod <- (atan(expressionData[cell_i, gene1])^power_parameter) * 
           (atan(expressionData[cell_i, gene2])^power_parameter)
