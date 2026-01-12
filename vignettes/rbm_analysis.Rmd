@@ -295,7 +295,7 @@ draw(heatmap_weights)
 ```
 
 ```{r fig.width = 15}
-pheatmap(t(rbm$weights_per_layer$seurat_annotations[which(rowSums(scale(rbm$weights_per_layer$seurat_annotations)) > 6),]), 
+pheatmap::pheatmap(t(rbm$weights_per_layer$seurat_annotations[which(rowSums(scale(rbm$weights_per_layer$seurat_annotations)) > 6),]), 
          cluster_rows=TRUE, cluster_cols=TRUE, scale = 'row', 
          color = colorRampPalette(c("blue", "white", "red"))(100), 
          main = "RBM Weights: Features to Cell Types", name = "Scaled Weight")
