@@ -48,6 +48,7 @@ install.packages(c("progressr", "viridisLite", "igraph"))
 library(PreGraphModeling)
 library(Seurat)
 library(ComplexHeatmap)
+library(pheatmap)
 ```
 
 ## Basic Workflow
