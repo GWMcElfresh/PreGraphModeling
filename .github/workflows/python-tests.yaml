@@ -73,7 +73,11 @@ jobs:
         run: |
           cd python
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          if [[ $(python --version) == "Python 3.12"* ]]; then
+            pip install --break-system-packages -e ".[dev]"
+          else
+            pip install -e ".[dev]"
+          fi
       
       - name: Run tests
         run: |
