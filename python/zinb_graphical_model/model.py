@@ -104,7 +104,7 @@ class ZINBGraphicalModel(PyroModule):
         Returns:
             Log probability of x under ZINB.
         """
-        nb_dist = dist.NegativeBinomial(total_count=phi, logits=torch.log(mu / phi))
+        nb_dist = dist.NegativeBinomial(total_count=phi, logits=torch.log(mu / (phi + 1e-10)))
         nb_log_prob = nb_dist.log_prob(x)
 
         is_zero = (x == 0).float()
@@ -159,7 +159,7 @@ class ZINBGraphicalModel(PyroModule):
             Omega_j_minus_j = Omega[j, mask]
 
             conditional_effect = F_X_minus_j @ Omega_j_minus_j
-            conditional_mu = torch.exp(torch.log(mu[j] + 1e-10) + conditional_effect)
+            conditional_mu = (mu[j] + 1e-10) * torch.exp(conditional_effect)
             conditional_mu = torch.clamp(conditional_mu, min=1e-10)
 
             log_prob_j = self._zinb_log_prob(X[:, j], conditional_mu, phi[j], pi_zero[j])
