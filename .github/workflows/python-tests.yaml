@@ -38,7 +38,7 @@ jobs:
       python-version: '3.11'
       use-base-image: true
       test-command: |
-        cd /app && \
+        cd "$GITHUB_WORKSPACE" && \
         pip install -e . && \
         python -m pytest tests/ -v --tb=short
       push-images: true
