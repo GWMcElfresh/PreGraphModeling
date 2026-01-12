@@ -39,6 +39,10 @@ Suggests:
     circlize,
     viridisLite,
     knitr,
-    rmarkdown
+    rmarkdown,
+    umap,
+    ggrepel,
+    pheatmap,
+    ggplot2
 Config/testthat/edition: 3
 VignetteBuilder: knitr
