@@ -39,7 +39,12 @@ jobs:
       use-base-image: true
       test-command: |
         cd $GITHUB_WORKSPACE && \
-        pip install -e . && \
+        cd $GITHUB_WORKSPACE && \
+        if [[ $(python3 --version) == *"3.12"* ]]; then
+          pip3 install --break-system-packages -e .
+        else
+          pip3 install -e .
+        fi && \
         python -m pytest tests/ -v --tb=short
       push-images: true
       push-runtime: ${{ github.ref == 'refs/heads/main' }}
