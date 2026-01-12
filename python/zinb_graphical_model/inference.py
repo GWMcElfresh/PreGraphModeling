@@ -1,7 +1,13 @@
 """
 Inference utilities for the ZINB graphical model.
 
-Implements NUTS/HMC sampling for joint inference of all parameters.
+Implements NUTS/HMC sampling for joint inference of all parameters:
+    θ (theta): Transform exponent in F(X) = atan(X)^θ
+    α (alpha): Interaction exponent in Ω_ij = -|atan(A_ij)|^α
+    Ω (Omega): Symmetric negative interaction matrix
+    μ (mu): ZINB mean parameters per feature
+    φ (phi): ZINB dispersion parameters per feature
+    π (pi_zero): Zero-inflation probabilities per feature
 """
 
 from typing import Any
@@ -26,21 +32,31 @@ def run_inference(
     """
     Run NUTS/HMC inference for the ZINB graphical model.
 
+    Jointly infers all model parameters using the No-U-Turn Sampler (NUTS),
+    an adaptive variant of Hamiltonian Monte Carlo.
+
     Args:
         model: ZINBGraphicalModel instance.
         X: Count matrix of shape (n_samples, n_features).
-        num_samples: Number of MCMC samples to draw.
-        warmup_steps: Number of warmup/burn-in steps.
-        num_chains: Number of parallel chains.
+        num_samples: Number of MCMC samples to draw from posterior.
+        warmup_steps: Number of warmup/burn-in steps for adaptation.
+        num_chains: Number of parallel MCMC chains.
         target_accept_prob: Target acceptance probability for NUTS.
-        max_tree_depth: Maximum tree depth for NUTS.
+        max_tree_depth: Maximum tree depth for NUTS trajectory.
         jit_compile: Whether to JIT compile the model (can speed up inference).
 
     Returns:
         Dictionary containing:
-            - 'samples': Dictionary of posterior samples for each parameter.
-            - 'omega_samples': Posterior samples of the interaction matrix Omega.
-            - 'summary': Summary statistics for the posterior.
+            - 'samples': Dictionary of posterior samples:
+                - 'theta' (θ): Transform exponent samples
+                - 'alpha' (α): Interaction exponent samples
+                - 'A_tril': Unconstrained interaction parameter samples
+                - 'mu' (μ): Mean parameter samples per feature
+                - 'phi' (φ): Dispersion parameter samples per feature
+                - 'pi_zero' (π): Zero-inflation probability samples
+            - 'omega_samples': Posterior samples of Ω matrix (n_samples, p, p).
+            - 'summary': Summary statistics (mean, std, quantiles) for all parameters.
+            - 'mcmc': The Pyro MCMC object for diagnostics.
     """
     pyro.clear_param_store()
 
@@ -94,11 +110,17 @@ def compute_summary(
     Compute summary statistics for posterior samples.
 
     Args:
-        samples: Dictionary of posterior samples.
-        omega_samples: Posterior samples of Omega matrix.
+        samples: Dictionary of posterior samples containing:
+            - 'theta' (θ): Transform exponent
+            - 'alpha' (α): Interaction exponent
+            - 'mu' (μ): Feature means
+            - 'phi' (φ): Feature dispersions
+            - 'pi_zero' (π): Zero-inflation probabilities
+        omega_samples: Posterior samples of Ω matrix of shape (n_posterior, p, p).
 
     Returns:
-        Dictionary of summary statistics.
+        Dictionary of summary statistics with mean, std, median, and quantiles
+        for each parameter, plus mean and std for the Ω matrix.
     """
     summary = {}
 

@@ -1,0 +1,71 @@
+# Python ZINB Graphical Model Dockerfile with PyTorch GPU Support
+# Multi-stage build: base -> deps -> runtime
+
+ARG DEPS_IMAGE=deps
+ARG BASE_IMAGE=python:3.11-slim
+
+# ============================================================================
+# Stage 1: Base - System dependencies
+# ============================================================================
+FROM ${BASE_IMAGE} AS base
+
+ARG DEBIAN_FRONTEND=noninteractive
+ARG SKIP_BASE_DEPS=false
+
+# Install system dependencies for PyTorch and scientific computing
+RUN if [ "$SKIP_BASE_DEPS" = "false" ]; then \
+    apt-get update && apt-get install -y \
+        build-essential \
+        git \
+        curl \
+        wget \
+        ca-certificates \
+        libgomp1 \
+        && rm -rf /var/lib/apt/lists/*; \
+    else \
+        echo "Skipping base dependency installation (using pre-built base image)"; \
+    fi
+
+# ============================================================================
+# Stage 2: Deps - Python packages with PyTorch
+# ============================================================================
+FROM base AS deps
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+WORKDIR /app
+
+# Copy requirements first for caching
+COPY python/requirements.txt /app/requirements.txt
+
+# Install PyTorch with CUDA support and other dependencies
+# Using pip with --extra-index-url for PyTorch CUDA wheels
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir \
+        torch>=2.6.0 \
+        pyro-ppl>=1.8.0 \
+        numpy>=1.20.0 \
+        pytest>=7.0.0 && \
+    rm -rf ~/.cache/pip
+
+# ============================================================================
+# Stage 3: Runtime - Application code
+# ============================================================================
+FROM ${DEPS_IMAGE} AS runtime
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+WORKDIR /app
+
+# Copy Python module
+COPY python/ /app/
+
+# Install the package in development mode
+RUN pip install -e . && \
+    rm -rf ~/.cache/pip
+
+# Set environment variables for GPU
+ENV CUDA_VISIBLE_DEVICES=0
+ENV PYTHONUNBUFFERED=1
+
+CMD ["python", "-m", "pytest", "tests/", "-v"]
