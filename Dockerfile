@@ -30,6 +30,14 @@ RUN if [ "$SKIP_BASE_DEPS" = "false" ]; then \
         libhdf5-dev \
         libgsl-dev \
         libglpk-dev \
+        libcairo2-dev \
+        libfontconfig1-dev \
+        libharfbuzz-dev \
+        libfribidi-dev \
+        libfreetype6-dev \
+        libpng-dev \
+        libtiff5-dev \
+        libjpeg-dev \
         && apt-get clean \
         && rm -rf /var/lib/apt/lists/*; \
     else \
@@ -45,11 +53,14 @@ ARG DEBIAN_FRONTEND=noninteractive
 ARG GH_PAT='NOT_SET'
 
 # Bioconductor installs
-# Bioconductor installs
-RUN R -e "BiocManager::install(c('DESeq2', 'HDF5Array', 'DelayedArray', 'ComplexHeatmap', 'circlize', 'viridisLite'), ask = FALSE, update = FALSE)"
+# Configure R to use Bioconductor repos by default
+RUN echo "local({options(repos = BiocManager::repositories())})" >> ~/.Rprofile
 
-# CRAN installs
-RUN R -e "install.packages(c('SeuratObject', 'pscl', 'Matrix', 'methods', 'parallel', 'mgcv', 'stats', 'testthat', 'Seurat', 'future', 'future.apply', 'remotes', 'devtools'), repos='https://cloud.r-project.org/', dependencies=TRUE)" && \
+# Bioconductor installs - explicit ComplexHeatmap install
+RUN Rscript -e "BiocManager::install(c('DESeq2', 'HDF5Array', 'DelayedArray', 'ComplexHeatmap'), ask = FALSE, update = TRUE)"
+
+# CRAN and other Suggested packages
+RUN Rscript -e "install.packages(c('SeuratObject', 'pscl', 'Matrix', 'methods', 'parallel', 'mgcv', 'stats', 'testthat', 'Seurat', 'future', 'future.apply', 'remotes', 'devtools', 'progressr', 'igraph', 'knitr', 'rmarkdown', 'umap', 'ggrepel', 'pheatmap', 'ggplot2', 'circlize', 'viridisLite'), repos='https://cloud.r-project.org/', dependencies=TRUE)" && \
     rm -rf /tmp/downloaded_packages/ /tmp/*.rds
 
 # ============================================================================
