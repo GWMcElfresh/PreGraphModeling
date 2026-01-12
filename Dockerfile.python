@@ -60,6 +60,9 @@ WORKDIR /app
 # Copy Python module
 COPY python/ /app/
 
+# Allow pip to install into system python (Common in containerized environments)
+ENV PIP_BREAK_SYSTEM_PACKAGES=1
+
 # Install the package in development mode
 RUN pip install -e . && \
     rm -rf ~/.cache/pip

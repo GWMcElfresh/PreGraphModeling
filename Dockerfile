@@ -45,7 +45,8 @@ ARG DEBIAN_FRONTEND=noninteractive
 ARG GH_PAT='NOT_SET'
 
 # Bioconductor installs
-RUN R -e "BiocManager::install(c('DESeq2', 'HDF5Array', 'DelayedArray'), ask = FALSE, update = FALSE)"
+# Bioconductor installs
+RUN R -e "BiocManager::install(c('DESeq2', 'HDF5Array', 'DelayedArray', 'ComplexHeatmap', 'circlize', 'viridisLite'), ask = FALSE, update = FALSE)"
 
 # CRAN installs
 RUN R -e "install.packages(c('SeuratObject', 'pscl', 'Matrix', 'methods', 'parallel', 'mgcv', 'stats', 'testthat', 'Seurat', 'future', 'future.apply', 'remotes', 'devtools'), repos='https://cloud.r-project.org/', dependencies=TRUE)" && \
