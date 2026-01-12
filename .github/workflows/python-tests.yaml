@@ -51,6 +51,8 @@ jobs:
   # Direct pytest job (without Docker) for faster feedback on PRs
   pytest:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     
     strategy:
       fail-fast: false

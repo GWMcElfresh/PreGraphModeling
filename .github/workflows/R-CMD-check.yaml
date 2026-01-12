@@ -43,7 +43,7 @@ jobs:
       bioc-version: '3.21'
       use-base-image: true
       test-command: |
-        Rscript -e "devtools::install_deps(dependencies = TRUE, upgrade = \"never\")" && \        
+        Rscript -e "devtools::install_deps(dependencies = TRUE, upgrade = \"never\")" && \
         Rscript -e "devtools::test()" && \
         R CMD build . && \
         PKG=$(ls -1t *.tar.gz | head -n1) && \
