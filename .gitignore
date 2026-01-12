@@ -51,3 +51,18 @@ rsconnect/
 # Package build artifacts
 *.tar.gz
 *.Rcheck/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+build/
+*.egg
+.pytest_cache/
+.mypy_cache/
+.venv/
+venv/
+ENV/
