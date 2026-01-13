@@ -117,7 +117,6 @@ class ZINBPseudoLikelihoodGraphicalModel(PyroModule):
         nb_dist = dist.NegativeBinomial(total_count=phi, logits=torch.log(mu / (phi + 1e-10)))
         nb_log_prob = nb_dist.log_prob(x)
 
-        is_zero = (x == 0).float()
         log_pi = torch.log(pi_zero + 1e-10)
         log_one_minus_pi = torch.log(1 - pi_zero + 1e-10)
 
