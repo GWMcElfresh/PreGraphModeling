@@ -67,6 +67,5 @@ __all__ = [
     "run_inference",
     "load_count_matrix",
     "GPUNotAvailableWarning",
-    "_check_gpu_availability",
 ]
 __version__ = "0.1.0"
