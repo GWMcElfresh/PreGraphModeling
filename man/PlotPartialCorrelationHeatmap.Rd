@@ -15,7 +15,7 @@ PlotPartialCorrelationHeatmap(
   show_column_names = TRUE,
   color_palette = "RdBu",
   title = "RBM Partial Correlations",
-  name = "Partial\\nCorrelation",
+  name = "Partial Correlation",
   ...
 )
 }

@@ -74,7 +74,9 @@
 }
 
 .allocate_counts_evenly <- function(nTotal, nGroups) {
-  if (nGroups <= 0) return(integer(0))
+  if (nGroups <= 0) {
+    return(integer(0))
+  }
   nTotal <- as.integer(nTotal)
   base <- nTotal %/% nGroups
   rem <- nTotal - base * nGroups
@@ -178,36 +180,39 @@
 #' heatmap_plot <- PlotRBMHeatmap(rbm, color_palette = "viridis")
 #' }
 PlotPartialCorrelationHeatmap <- function(rbmObject,
-                                         features = NULL,
-                                         nEdges = 50,
-                                         nFeatures = NULL,
-                                         cluster_rows = TRUE,
-                                         cluster_columns = TRUE,
-                                         show_row_names = TRUE,
-                                         show_column_names = TRUE,
-                                         color_palette = "RdBu",
-                                         title = "RBM Partial Correlations",
-                                         name = "Partial\nCorrelation",
-                                         ...) {
-  
+                                          features = NULL,
+                                          nEdges = 50,
+                                          nFeatures = NULL,
+                                          cluster_rows = TRUE,
+                                          cluster_columns = TRUE,
+                                          show_row_names = TRUE,
+                                          show_column_names = TRUE,
+                                          color_palette = "RdBu",
+                                          title = "RBM Partial Correlations",
+                                          name = "Partial Correlation",
+                                          ...) {
   # ============================================================================
   # INPUT VALIDATION
   # ============================================================================
-  
+
   if (!inherits(rbmObject, "RBM")) {
     stop("rbmObject must be an RBM object created by FitRBM()")
   }
-  
+
   if (!requireNamespace("ComplexHeatmap", quietly = TRUE)) {
-    stop("Package 'ComplexHeatmap' is required for this function. ",
-         "Install it with: BiocManager::install('ComplexHeatmap')")
+    stop(
+      "Package 'ComplexHeatmap' is required for this function. ",
+      "Install it with: BiocManager::install('ComplexHeatmap')"
+    )
   }
 
   if (!requireNamespace("circlize", quietly = TRUE)) {
-    stop("Package 'circlize' is required for this function. ",
-         "Install it with: BiocManager::install('circlize')")
+    stop(
+      "Package 'circlize' is required for this function. ",
+      "Install it with: BiocManager::install('circlize')"
+    )
   }
-  
+
   # Extract partial correlation matrix
   pcor_matrix <- rbmObject$partial_correlations
 
@@ -228,21 +233,21 @@ PlotPartialCorrelationHeatmap <- function(rbmObject,
     )
     pcor_matrix <- pcor_matrix[selected, selected, drop = FALSE]
   }
-  
+
   # Check for empty matrix
   if (nrow(pcor_matrix) == 0 || ncol(pcor_matrix) == 0) {
     stop("No valid partial correlations to plot")
   }
-  
+
   # ============================================================================
   # PREPARE COLOR PALETTE
   # ============================================================================
-  
+
   # Determine color range
   # Correlations range from -1 to 1, but actual values may be more constrained
   cor_range <- range(pcor_matrix, na.rm = TRUE)
   max_abs_cor <- max(abs(cor_range))
-  
+
   # Create color function based on palette
   if (color_palette == "RdBu") {
     # Red-Blue diverging (standard for correlations)
@@ -293,11 +298,11 @@ PlotPartialCorrelationHeatmap <- function(rbmObject,
       c("blue", "white", "red")
     )
   }
-  
+
   # ============================================================================
   # CREATE HEATMAP
   # ============================================================================
-  
+
   # Handle row/column name display based on matrix size
   if (nrow(pcor_matrix) > 50 && show_row_names) {
     show_row_names <- FALSE
@@ -307,7 +312,7 @@ PlotPartialCorrelationHeatmap <- function(rbmObject,
     show_column_names <- FALSE
     message("Note: Hiding column names due to large matrix size (>50 features)")
   }
-  
+
   # Create heatmap using ComplexHeatmap
   heatmap <- ComplexHeatmap::Heatmap(
     matrix = pcor_matrix,
@@ -329,7 +334,7 @@ PlotPartialCorrelationHeatmap <- function(rbmObject,
     ),
     ...
   )
-  
+
   return(heatmap)
 }
 
@@ -348,7 +353,7 @@ PlotRBMHeatmap <- function(rbmObject,
                            show_column_names = TRUE,
                            color_palette = "RdBu",
                            title = "RBM Partial Correlations",
-                           name = "Partial\nCorrelation",
+                           name = "Partial Correlation",
                            ...) {
   PlotPartialCorrelationHeatmap(
     rbmObject = rbmObject,
@@ -411,26 +416,25 @@ PlotRBMHeatmap <- function(rbmObject,
 #' )
 #' }
 PlotRBMWeightsHeatmap <- function(rbmObject,
-                                 features = NULL,
-                                 factors = NULL,
-                                 nFeatures = 50,
-                                 cluster_rows = TRUE,
-                                 cluster_columns = FALSE,
-                                 show_row_names = TRUE,
-                                 show_column_names = TRUE,
-                                 color_palette = "RdBu",
-                                 title = "RBM Weights: Features to Hidden Factors",
-                                 name = "Weight",
-                                 ...) {
-  
+                                  features = NULL,
+                                  factors = NULL,
+                                  nFeatures = 50,
+                                  cluster_rows = TRUE,
+                                  cluster_columns = FALSE,
+                                  show_row_names = TRUE,
+                                  show_column_names = TRUE,
+                                  color_palette = "RdBu",
+                                  title = "RBM Weights: Features to Hidden Factors",
+                                  name = "Weight",
+                                  ...) {
   # ============================================================================
   # INPUT VALIDATION
   # ============================================================================
-  
+
   if (!inherits(rbmObject, "RBM")) {
     stop("rbmObject must be an RBM object created by FitRBM()")
   }
-  
+
   if (!requireNamespace("ComplexHeatmap", quietly = TRUE)) {
     stop("Package 'ComplexHeatmap' is required. Install with: BiocManager::install('ComplexHeatmap')")
   }
@@ -438,29 +442,29 @@ PlotRBMWeightsHeatmap <- function(rbmObject,
   if (!requireNamespace("circlize", quietly = TRUE)) {
     stop("Package 'circlize' is required. Install with: BiocManager::install('circlize')")
   }
-  
+
   # Determine which factors to plot
   factors_to_plot <- if (is.null(factors)) rbmObject$hidden_factors else factors
-  
+
   # Validate factors
   missing_factors <- setdiff(factors_to_plot, rbmObject$hidden_factors)
   if (length(missing_factors) > 0) {
     stop(sprintf("Factors not found in RBM: %s", paste(missing_factors, collapse = ", ")))
   }
-  
+
   # ============================================================================
   # COMBINE WEIGHT MATRICES FROM MULTIPLE LAYERS
   # ============================================================================
-  
+
   # Combine weight matrices for selected factors
   weight_list <- list()
   for (factor_name in factors_to_plot) {
     weight_list[[factor_name]] <- rbmObject$weights_per_layer[[factor_name]]
   }
-  
+
   # Concatenate horizontally
   weight_matrix <- do.call(cbind, weight_list)
-  
+
   # Filter/select features
   if (!is.null(features)) {
     available <- intersect(features, rownames(weight_matrix))
@@ -477,14 +481,14 @@ PlotRBMWeightsHeatmap <- function(rbmObject,
     selected <- intersect(selected, rownames(weight_matrix))
     weight_matrix <- weight_matrix[selected, , drop = FALSE]
   }
-  
+
   # ============================================================================
   # PREPARE COLOR PALETTE
   # ============================================================================
-  
+
   weight_range <- range(weight_matrix, na.rm = TRUE)
   max_abs_weight <- max(abs(weight_range))
-  
+
   if (color_palette == "RdBu") {
     col_fun <- circlize::colorRamp2(
       c(-max_abs_weight, 0, max_abs_weight),
@@ -501,18 +505,18 @@ PlotRBMWeightsHeatmap <- function(rbmObject,
       c("blue", "white", "red")
     )
   }
-  
+
   # ============================================================================
   # CREATE COLUMN ANNOTATION FOR LAYER GROUPING
   # ============================================================================
-  
+
   # Create factor annotations to show which columns belong to which layer
   layer_annotations <- character(ncol(weight_matrix))
   layer_colors <- character(ncol(weight_matrix))
-  
+
   col_idx <- 1
   color_palette_layers <- c("#E41A1C", "#377EB8", "#4DAF4A", "#984EA3", "#FF7F00", "#FFFF33")
-  
+
   for (i in seq_along(factors_to_plot)) {
     factor_name <- factors_to_plot[i]
     n_cols <- ncol(rbmObject$weights_per_layer[[factor_name]])
@@ -520,7 +524,7 @@ PlotRBMWeightsHeatmap <- function(rbmObject,
     layer_colors[col_idx:(col_idx + n_cols - 1)] <- color_palette_layers[(i - 1) %% length(color_palette_layers) + 1]
     col_idx <- col_idx + n_cols
   }
-  
+
   # Create column annotation
   column_ha <- ComplexHeatmap::HeatmapAnnotation(
     Layer = layer_annotations,
@@ -530,16 +534,16 @@ PlotRBMWeightsHeatmap <- function(rbmObject,
       Layer = list(title = "Hidden Layer", title_gp = grid::gpar(fontsize = 10, fontface = "bold"))
     )
   )
-  
+
   # ============================================================================
   # CREATE HEATMAP
   # ============================================================================
-  
+
   if (nrow(weight_matrix) > 50 && show_row_names) {
     show_row_names <- FALSE
     message("Note: Hiding row names due to large matrix size")
   }
-  
+
   heatmap <- ComplexHeatmap::Heatmap(
     matrix = weight_matrix,
     name = name,
@@ -560,7 +564,7 @@ PlotRBMWeightsHeatmap <- function(rbmObject,
     ),
     ...
   )
-  
+
   return(heatmap)
 }
 

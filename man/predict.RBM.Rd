@@ -14,7 +14,7 @@ Rows should be features (matching those in the RBM) and columns are new observat
 If NULL, uses the training data (default: NULL).}
 
 \item{type}{Character string specifying the type of prediction.
-Only "activation" is supported. Note that this returns the \emph{post-activation} output:
+Only "activation" is supported. Note that this returns the *post-activation* output:
 probabilities for binary (sigmoid) and categorical (softmax) layers, and linear scores
 for continuous/ordinal layers (default: "activation").}
 
@@ -38,7 +38,7 @@ where v is the visible layer (expression), W_layer is the weight matrix for that
 b_layer is the hidden bias for that layer, and activation_function depends on the
 metadata type (sigmoid for binary, softmax for categorical, linear for continuous/ordinal).
 
-For binary layers, the returned value can be interpreted as \eqn{P(h=1\mid v)}.
+For binary layers, the returned value can be interpreted as $P(h=1\mid v)$.
 For categorical layers, each row is a probability vector over levels (rows sum to 1).
 For continuous/ordinal layers, the output is a score on the model's internal scale and
 is not a calibrated likelihood.

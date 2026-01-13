@@ -1,55 +1,56 @@
-# For help debugging build failures open an issue on the RStudio community with the 'github-actions' tag.
-# https://community.rstudio.com/new-topic?category=Package%20development&tags=github-actions
+name: R Build and Checks
+
 on:
   workflow_dispatch:
   push:
     branches: [ main, dev ]
+    paths:
+      - 'R/**'
+      - 'tests/**'
+      - 'man/**'
+      - 'DESCRIPTION'
+      - 'NAMESPACE'
+      - 'Dockerfile'
+      - '.github/workflows/R-CMD-check.yaml'
   pull_request:
+    paths:
+      - 'R/**'
+      - 'tests/**'
+      - 'man/**'
+      - 'DESCRIPTION'
+      - 'NAMESPACE'
+      - 'Dockerfile'
+      - '.github/workflows/R-CMD-check.yaml'
   schedule:
     - cron: "0 6 10 * *"
 
-name: R Build and Checks
-
 jobs:
-  R-CMD-check:
-    runs-on: ubuntu-${{ matrix.config.os }}
-
-    name: ubuntu-${{ matrix.config.os }} (${{ matrix.config.r }} / ${{ matrix.config.bioc }})
-
-    strategy:
-      fail-fast: false
-      matrix:
-        config:
-          - { os: 24.04, r: '4.5', bioc: '3.21', pkgdown: "true" }
-
-    env:
-      R_REMOTES_NO_ERRORS_FROM_WARNINGS: true
-      GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: bimberlabinternal/DevOps/githubActions/r-gh-setup@master
-        with:
-          r_version: ${{ matrix.config.r }}
-          bioc_version: ${{ matrix.config.bioc }}
-          cache_version: ${{ secrets.CACHE_VERSION }}
-        env:
-          GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
-
-      - uses: r-lib/actions/check-r-package@v2
-        with:
-          args: 'c("--no-manual")'
-        env:
-          _R_CHECK_CRAN_INCOMING_: false
-
-      - name: Install package
-        if: github.ref == 'refs/heads/main' && matrix.config.pkgdown == 'true'
-        run: R CMD INSTALL .
-
-      - name: Deploy package
-        if: github.ref == 'refs/heads/main' && matrix.config.pkgdown == 'true'
-        run: |
-          git config --local user.email "actions@github.com"
-          git config --local user.name "GitHub Actions"
-          Rscript -e 'pkgdown::deploy_to_branch(new_process = FALSE, clean = TRUE)'
+  # Build base image monthly (uses shared workflow from dockerDependencies)
+  build-base:
+    uses: GWMcElfresh/dockerDependencies/.github/workflows/build-base-image.yml@main
+    permissions:
+      contents: read
+      packages: write
+    secrets: inherit
+  
+  # Build and test with Docker caching (uses shared workflow from dockerDependencies)
+  docker-build-and-test:
+    needs: build-base
+    if: always()  # Run even if base build is skipped 
+    uses: GWMcElfresh/dockerDependencies/.github/workflows/docker-cache.yml@main
+    with:
+      r-version: '4.5'
+      bioc-version: '3.21'
+      use-base-image: true
+      test-command: |
+        Rscript -e "devtools::install_deps(dependencies = TRUE, upgrade = \"never\")" && \
+        Rscript -e "devtools::test()" && \
+        R CMD build . && \
+        PKG=$(ls -1t *.tar.gz | head -n1) && \
+        R CMD check "$PKG" --no-manual --no-build-vignettes
+      push-images: true
+      push-runtime: ${{ github.ref == 'refs/heads/main' }}
+    permissions:
+      contents: read
+      packages: write
+    secrets: inherit

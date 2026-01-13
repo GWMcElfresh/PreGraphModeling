@@ -1,6 +1,6 @@
-# Multi-stage Dockerfile for PreGraphModeling
+# Multi-stage Dockerfile for tcrClustR
 # Stage 1: Base - System dependencies and base tools
-# Stage 2: Deps - R packages (cached layer)
+# Stage 2: Deps - R packages and Python packages (cached layer)
 # Stage 3: Runtime - Final application build
 
 # NOTE: Any ARG used in a FROM instruction must be declared before the first FROM.
@@ -77,7 +77,7 @@ RUN if [ "$SKIP_BASE_DEPS" = "false" ]; then \
     fi
 
 # ============================================================================
-# Stage 2: Deps - Install R dependencies
+# Stage 2: Deps - Install R and Python dependencies
 # ============================================================================
 
 # Build args and control flow:
@@ -93,8 +93,22 @@ FROM base AS deps
 
 ARG DEBIAN_FRONTEND=noninteractive
 ARG GH_PAT='NOT_SET'
+COPY requirements.txt /tmp/requirements.txt
+
+# Install Python packages in a virtual environment
+RUN apt-get update && \
+    apt-get install -y python3-pip python3-venv && \
+    python3 -m venv /opt/venv && \
+    . /opt/venv/bin/activate && \
+    pip install --upgrade pip && \
+    pip install --no-cache-dir -r /tmp/requirements.txt && \
+    rm -rf /var/lib/apt/lists/*
+
+# Add virtual environment to PATH so Python scripts can find packages
+ENV PATH="/opt/venv/bin:$PATH"
 
 # Install R dependencies
+# TODO: when the latest seurat is pushed to CRAN we can drop the remotes install
 RUN apt-get update && apt-get install -y r-base r-base-dev && \
     if [ "${GH_PAT}" != 'NOT_SET' ]; then \
         echo 'Setting GH_PAT'; \
@@ -102,12 +116,14 @@ RUN apt-get update && apt-get install -y r-base r-base-dev && \
     fi && \
     Rscript -e "install.packages(c('remotes', 'devtools', 'BiocManager', 'pryr', 'rmdformats', 'knitr', 'logger', 'Matrix', 'kernlab', 'tidyverse', 'leidenbase', 'igraph', 'FNN', 'plyr'), lib='/usr/local/lib/R/site-library', dependencies=TRUE, ask = FALSE)" && \
     echo "local({options(repos = BiocManager::repositories())})" >> ~/.Rprofile && \
-    Rscript -e "BiocManager::install(c('DESeq2', 'HDF5Array', 'DelayedArray', 'ComplexHeatmap'), ask = FALSE, update = TRUE)" && \
-    Rscript -e "install.packages(c('SeuratObject', 'pscl', 'methods', 'parallel', 'mgcv', 'stats', 'testthat', 'Seurat', 'future', 'future.apply', 'progressr', 'rmarkdown', 'umap', 'ggrepel', 'pheatmap', 'ggplot2', 'circlize', 'viridisLite'), lib='/usr/local/lib/R/site-library', dependencies=TRUE, ask = FALSE)" && \
+    Rscript -e "BiocManager::install('ComplexHeatmap', ask = FALSE, update = TRUE)" && \
+    Rscript -e "remotes::install_github('kevinsblake/NatParksPalettes', upgrade='never')" && \
+    Rscript -e "remotes::install_github('satijalab/seurat', upgrade='never')" && \
+    Rscript -e "install.packages(c('clusterCrit', 'dbscan', 'cluster', 'arrow', 'RColorBrewer', 'patchwork'), lib='/usr/local/lib/R/site-library', dependencies=TRUE, ask = FALSE)" && \
     rm -rf /var/lib/apt/lists/* /tmp/downloaded_packages/ /tmp/*.rds
 
 # ============================================================================
-# Stage 3: Runtime - Build and install PreGraphModeling package
+# Stage 3: Runtime - Build and install tcrClustR package
 # ============================================================================
 # Build args and control flow:
 # - DEPS_IMAGE (declared before any FROM):
@@ -128,16 +144,19 @@ ARG DEBIAN_FRONTEND=noninteractive
 ARG GH_PAT='NOT_SET'
 
 # Copy application code
-ADD . /PreGraphModeling
+ADD . /tcrClustR
 
 # Set working directory so tests running with '.' can locate DESCRIPTION
-WORKDIR /PreGraphModeling
+WORKDIR /tcrClustR
 
-# Build and install PreGraphModeling
+# Build and install tcrClustR
 # upgrade = 'never' is specified because the dependencies install/upgrading is already handled in the deps stage
-RUN cd /PreGraphModeling && \
+RUN cd /tcrClustR && \
     R CMD build . && \
     R CMD INSTALL --build *.tar.gz && \
     rm -Rf /tmp/downloaded_packages/ /tmp/*.rds
 
-CMD ["R"]
+ENV NUMBA_CACHE_DIR=/work/numba_cache
+ENV MPLCONFIGDIR=/work/mpl_cache
+
+CMD ["/bin/bash"]
