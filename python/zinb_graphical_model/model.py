@@ -23,6 +23,8 @@ import pyro
 import pyro.distributions as dist
 from pyro.nn import PyroModule
 
+from . import _check_gpu_availability
+
 
 class ZINBPseudoLikelihoodGraphicalModel(PyroModule):
     """
@@ -52,6 +54,11 @@ class ZINBPseudoLikelihoodGraphicalModel(PyroModule):
         """
         super().__init__()
         self.n_features = n_features
+        
+        # Check GPU availability and warn if in CPU-only mode
+        if device == "cuda":
+            _check_gpu_availability()
+        
         available_device = device if torch.cuda.is_available() else "cpu"
         self.device = torch.device(available_device)
         self.n_interaction_params = (n_features * (n_features - 1)) // 2

@@ -31,11 +31,11 @@ X = load_count_matrix("counts.npy", device="cuda")
 ### Create and run inference
 
 ```python
-from zinb_graphical_model import ZINBGraphicalModel, run_inference
+from zinb_graphical_model import ZINBPseudoLikelihoodGraphicalModel, run_inference
 
 # Initialize model
 n_features = X.shape[1]
-model = ZINBGraphicalModel(n_features=n_features, device="cuda")
+model = ZINBPseudoLikelihoodGraphicalModel(n_features=n_features, device="cuda")
 
 # Run NUTS inference
 results = run_inference(
@@ -48,25 +48,27 @@ results = run_inference(
 )
 
 # Access posterior samples
-omega_samples = results["omega_samples"]     # Interaction matrix (n_samples, n_features, n_features)
-mu_samples = results["samples"]["mu"]        # ZINB mean parameters
-phi_samples = results["samples"]["phi"]      # ZINB dispersion parameters
-pi_samples = results["samples"]["pi_zero"]   # Zero-inflation probabilities
+A_tril_samples = results["samples"]["A_tril"]  # Unconstrained interaction parameters
+omega_samples = results["omega_samples"]       # Interaction matrix
+mu_samples = results["samples"]["mu"]          # ZINB mean parameters
+phi_samples = results["samples"]["phi"]        # ZINB dispersion parameters
+pi_samples = results["samples"]["pi_zero"]     # Zero-inflation probabilities
 
 # Summary statistics
 summary = results["summary"]
 print(f"Omega posterior mean:\n{summary['omega']['mean']}")
+print(f"Mu posterior mean: {summary['mu']['mean']}")
 ```
 
 ## Model Details
 
 ### Interaction Matrix
 
-The interaction matrix Ω is parameterized via an unconstrained matrix A with lower-triangular elements:
-- Off-diagonal: Ω_ij = A_ij for i ≠ j (symmetric interactions)
+The interaction matrix Ω is parameterized via an unconstrained lower-triangular matrix A:
+- Off-diagonal: Ω_ij = A_ij for i ≠ j (direct mapping)
 - Diagonal: Ω_ii = 1 (fixed for identifiability)
 
-This ensures Ω is symmetric with unit diagonal, encoding conditional dependencies between features.
+This ensures Ω is symmetric with a unit diagonal.
 
 ### Pseudo-Likelihood
 
@@ -78,10 +80,10 @@ where each conditional is a ZINB distribution with mean adjusted by the interact
 
 ### Priors
 
-- A_ij ~ Normal(0, 1) for each off-diagonal element
-- μ_j ~ LogNormal(0, 1) for each feature mean
-- φ_j ~ LogNormal(0, 1) for each feature dispersion
-- π_j ~ Beta(1, 1) for each feature zero-inflation probability
+- A_ij ~ Normal(0, 1) for each element in lower triangle
+- μ_j ~ LogNormal(0, 1) for each feature
+- φ_j ~ LogNormal(0, 1) for each feature
+- π_j ~ Beta(1, 1) for each feature
 
 ## Requirements
 
