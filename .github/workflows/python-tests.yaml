@@ -39,7 +39,7 @@ jobs:
       use-base-image: true
       test-command: |
         cd "$GITHUB_WORKSPACE" && \
-        pip install -e . && \
+        pip install -e . --break-system-packages && \
         python -m pytest tests/ -v --tb=short
       push-images: true
       push-runtime: ${{ github.ref == 'refs/heads/main' }}
@@ -47,7 +47,6 @@ jobs:
       contents: read
       packages: write
     secrets: inherit
-
   # Direct pytest job (without Docker) for faster feedback on PRs
   pytest:
     runs-on: ubuntu-latest
