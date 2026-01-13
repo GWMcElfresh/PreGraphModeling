@@ -39,7 +39,7 @@ jobs:
       use-base-image: true
       test-command: |
         cd python && \
-        pip install -e . --break-system-packages && \
+        pip install -e . --break-system-packages --index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple && \
         python -m pytest tests/ -v --tb=short
       push-images: true
       push-runtime: ${{ github.ref == 'refs/heads/main' }}
