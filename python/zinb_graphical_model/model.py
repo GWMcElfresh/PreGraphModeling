@@ -28,7 +28,7 @@ class ZINBPseudoLikelihoodGraphicalModel(PyroModule):
     """
     Zero-Inflated Negative Binomial (ZINB) Graphical Model with Pseudo-Likelihood Inference.
 
-    The model use raw counts X for dependence and parameterizes interactions via an unconstrained matrix A
+    The model uses raw counts X for dependence and parameterizes interactions via an unconstrained matrix A
     mapped directly to a symmetric precision matrix Ω.
 
     Parameters are jointly inferred using NUTS/HMC on GPU.
