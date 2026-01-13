@@ -45,9 +45,9 @@ if os.environ.get("PREGRAPHMODELING_DOCKER_MODE") == "cpu":
         file=sys.stderr
     )
 
-from .model import ZINBGraphicalModel
+from .model import ZINBPseudoLikelihoodGraphicalModel
 from .inference import run_inference
 from .data import load_count_matrix
 
-__all__ = ["ZINBGraphicalModel", "run_inference", "load_count_matrix"]
+__all__ = ["ZINBPseudoLikelihoodGraphicalModel", "run_inference", "load_count_matrix"]
 __version__ = "0.1.0"

@@ -77,100 +77,79 @@ class TestLoadCountMatrix:
                 load_count_matrix(str(filepath), device="cpu")
 
 
-class TestZINBGraphicalModel:
-    """Tests for the ZINBGraphicalModel class."""
+class TestZINBPseudoLikelihoodGraphicalModel:
+    """Tests for the ZINBPseudoLikelihoodGraphicalModel class."""
 
     def test_model_initialization(self):
         """Test model initialization."""
-        from zinb_graphical_model.model import ZINBGraphicalModel
+        from zinb_graphical_model.model import ZINBPseudoLikelihoodGraphicalModel
 
-        model = ZINBGraphicalModel(n_features=5, device="cpu")
+        model = ZINBPseudoLikelihoodGraphicalModel(n_features=5, device="cpu")
 
         assert model.n_features == 5
         assert model.device.type == "cpu"
         assert model.n_interaction_params == 10
 
-    def test_transform_counts(self):
-        """Test the learnable transform F(X) = atan(X)^theta."""
-        from zinb_graphical_model.model import ZINBGraphicalModel
 
-        model = ZINBGraphicalModel(n_features=3, device="cpu")
-        X = torch.tensor([[0.0, 1.0, 2.0], [3.0, 4.0, 5.0]])
-        theta = torch.tensor(1.0)
-
-        result = model._transform_counts(X, theta)
-
-        expected = torch.atan(X).pow(theta)
-        assert torch.allclose(result, expected)
-
-    def test_transform_counts_different_theta(self):
-        """Test transform with different theta values."""
-        from zinb_graphical_model.model import ZINBGraphicalModel
-
-        model = ZINBGraphicalModel(n_features=2, device="cpu")
-        X = torch.tensor([[1.0, 2.0]])
-
-        theta_1 = torch.tensor(0.5)
-        theta_2 = torch.tensor(2.0)
-
-        result_1 = model._transform_counts(X, theta_1)
-        result_2 = model._transform_counts(X, theta_2)
-
-        assert not torch.allclose(result_1, result_2)
 
     def test_build_omega_symmetry(self):
         """Test that Omega is symmetric."""
-        from zinb_graphical_model.model import ZINBGraphicalModel
+        from zinb_graphical_model.model import ZINBPseudoLikelihoodGraphicalModel
 
         n_features = 4
-        model = ZINBGraphicalModel(n_features=n_features, device="cpu")
+        model = ZINBPseudoLikelihoodGraphicalModel(n_features=n_features, device="cpu")
 
         n_params = (n_features * (n_features - 1)) // 2
         A_tril = torch.randn(n_params)
-        alpha = torch.tensor(1.0)
-
-        Omega = model._build_omega(A_tril, alpha)
+        Omega = model._build_omega(A_tril)
 
         assert Omega.shape == (n_features, n_features)
         assert torch.allclose(Omega, Omega.T)
 
-    def test_build_omega_negative_off_diagonal(self):
-        """Test that off-diagonal elements of Omega are non-positive."""
-        from zinb_graphical_model.model import ZINBGraphicalModel
+    def test_build_omega_mixed_signs(self):
+        """Test that Omega entries preserve the sign of A (mixed signs)."""
+        from zinb_graphical_model.model import ZINBPseudoLikelihoodGraphicalModel
 
         n_features = 3
-        model = ZINBGraphicalModel(n_features=n_features, device="cpu")
+        model = ZINBPseudoLikelihoodGraphicalModel(n_features=n_features, device="cpu")
 
-        n_params = (n_features * (n_features - 1)) // 2
-        A_tril = torch.randn(n_params)
-        alpha = torch.tensor(1.5)
+        # A parameters for n=3: flattened lower tril.
+        # Indices: (1,0), (2,0), (2,1) for 3 features.
+        A_tril = torch.tensor([-1.0, 1.0, 0.0])
 
-        Omega = model._build_omega(A_tril, alpha)
+        Omega = model._build_omega(A_tril)
 
-        mask = ~torch.eye(n_features, dtype=torch.bool)
-        assert (Omega[mask] <= 0).all()
+        # Omega[1,0] should be -1.0
+        assert Omega[1, 0] == -1.0
+        assert Omega[0, 1] == -1.0
+
+        # Omega[2,0] should be 1.0
+        assert Omega[2, 0] == 1.0
+        assert Omega[0, 2] == 1.0
+
+        # Omega[2,1] should be 0.0
+        assert Omega[2, 1] == 0.0
+        assert Omega[1, 2] == 0.0
 
     def test_build_omega_unit_diagonal(self):
         """Test that diagonal elements of Omega are 1."""
-        from zinb_graphical_model.model import ZINBGraphicalModel
+        from zinb_graphical_model.model import ZINBPseudoLikelihoodGraphicalModel
 
         n_features = 5
-        model = ZINBGraphicalModel(n_features=n_features, device="cpu")
+        model = ZINBPseudoLikelihoodGraphicalModel(n_features=n_features, device="cpu")
 
         n_params = (n_features * (n_features - 1)) // 2
         A_tril = torch.randn(n_params)
-        alpha = torch.tensor(2.0)
-
-        Omega = model._build_omega(A_tril, alpha)
+        Omega = model._build_omega(A_tril)
 
         diagonal = torch.diag(Omega)
         assert torch.allclose(diagonal, torch.ones(n_features))
 
     def test_zinb_log_prob_zeros(self):
         """Test ZINB log prob computation for zero counts."""
-        from zinb_graphical_model.model import ZINBGraphicalModel
+        from zinb_graphical_model.model import ZINBPseudoLikelihoodGraphicalModel
 
-        model = ZINBGraphicalModel(n_features=1, device="cpu")
+        model = ZINBPseudoLikelihoodGraphicalModel(n_features=1, device="cpu")
 
         x = torch.tensor([0.0, 0.0, 0.0])
         mu = torch.tensor(5.0)
@@ -184,9 +163,9 @@ class TestZINBGraphicalModel:
 
     def test_zinb_log_prob_positive_counts(self):
         """Test ZINB log prob computation for positive counts."""
-        from zinb_graphical_model.model import ZINBGraphicalModel
+        from zinb_graphical_model.model import ZINBPseudoLikelihoodGraphicalModel
 
-        model = ZINBGraphicalModel(n_features=1, device="cpu")
+        model = ZINBPseudoLikelihoodGraphicalModel(n_features=1, device="cpu")
 
         x = torch.tensor([1.0, 2.0, 5.0])
         mu = torch.tensor(3.0)
@@ -201,20 +180,19 @@ class TestZINBGraphicalModel:
 
     def test_pseudo_log_likelihood_finite(self):
         """Test that pseudo-log-likelihood is finite."""
-        from zinb_graphical_model.model import ZINBGraphicalModel
+        from zinb_graphical_model.model import ZINBPseudoLikelihoodGraphicalModel
 
         n_samples, n_features = 10, 3
-        model = ZINBGraphicalModel(n_features=n_features, device="cpu")
+        model = ZINBPseudoLikelihoodGraphicalModel(n_features=n_features, device="cpu")
 
         X = torch.randint(0, 10, (n_samples, n_features)).float()
-        theta = torch.tensor(1.0)
         Omega = torch.eye(n_features)
         Omega[0, 1] = Omega[1, 0] = -0.1
         mu = torch.ones(n_features) * 5.0
         phi = torch.ones(n_features) * 2.0
         pi_zero = torch.ones(n_features) * 0.2
 
-        pll = model._pseudo_log_likelihood(X, theta, Omega, mu, phi, pi_zero)
+        pll = model._pseudo_log_likelihood(X, Omega, mu, phi, pi_zero)
 
         assert torch.isfinite(pll)
 
@@ -225,14 +203,14 @@ class TestInference:
     @pytest.mark.slow
     def test_run_inference_small(self):
         """Test running inference on a small dataset."""
-        from zinb_graphical_model.model import ZINBGraphicalModel
+        from zinb_graphical_model.model import ZINBPseudoLikelihoodGraphicalModel
         from zinb_graphical_model.inference import run_inference
 
         torch.manual_seed(42)
         n_samples, n_features = 20, 3
         X = torch.randint(0, 5, (n_samples, n_features)).float()
 
-        model = ZINBGraphicalModel(n_features=n_features, device="cpu")
+        model = ZINBPseudoLikelihoodGraphicalModel(n_features=n_features, device="cpu")
 
         results = run_inference(
             model,
@@ -246,8 +224,6 @@ class TestInference:
         assert "omega_samples" in results
         assert "summary" in results
 
-        assert "theta" in results["samples"]
-        assert "alpha" in results["samples"]
         assert "mu" in results["samples"]
         assert "phi" in results["samples"]
         assert "pi_zero" in results["samples"]
@@ -259,16 +235,13 @@ class TestInference:
         from zinb_graphical_model.inference import compute_summary
 
         samples = {
-            "theta": torch.tensor([1.0, 1.1, 0.9, 1.05]),
             "mu": torch.randn(4, 3),
         }
         omega_samples = torch.randn(4, 3, 3)
 
         summary = compute_summary(samples, omega_samples)
 
-        assert "theta" in summary
-        assert "mean" in summary["theta"]
-        assert "std" in summary["theta"]
+        assert "mu" in summary
 
         assert "omega" in summary
         assert summary["omega"]["mean"].shape == (3, 3)
@@ -281,7 +254,7 @@ class TestIntegration:
     def test_full_pipeline(self):
         """Test the full pipeline from loading to inference."""
         from zinb_graphical_model.data import load_count_matrix
-        from zinb_graphical_model.model import ZINBGraphicalModel
+        from zinb_graphical_model.model import ZINBPseudoLikelihoodGraphicalModel
         from zinb_graphical_model.inference import run_inference
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -293,7 +266,7 @@ class TestIntegration:
             np.save(filepath, data)
 
             X = load_count_matrix(str(filepath), device="cpu")
-            model = ZINBGraphicalModel(n_features=n_features, device="cpu")
+            model = ZINBPseudoLikelihoodGraphicalModel(n_features=n_features, device="cpu")
 
             results = run_inference(
                 model,
@@ -303,7 +276,6 @@ class TestIntegration:
                 num_chains=1,
             )
 
-            assert results["samples"]["theta"].shape[0] == 5
             assert results["omega_samples"].shape[0] == 5
 
             Omega_mean = results["summary"]["omega"]["mean"]

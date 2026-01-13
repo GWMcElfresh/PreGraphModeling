@@ -2,9 +2,7 @@
 Inference utilities for the ZINB graphical model.
 
 Implements NUTS/HMC sampling for joint inference of all parameters:
-    θ (theta): Transform exponent in F(X) = atan(X)^θ
-    α (alpha): Interaction exponent in Ω_ij = -|atan(A_ij)|^α
-    Ω (Omega): Symmetric negative interaction matrix
+    Ω (Omega): Symmetric interaction matrix with unit diagonal
     μ (mu): ZINB mean parameters per feature
     φ (phi): ZINB dispersion parameters per feature
     π (pi_zero): Zero-inflation probabilities per feature
@@ -16,11 +14,11 @@ import torch
 import pyro
 from pyro.infer import MCMC, NUTS
 
-from .model import ZINBGraphicalModel
+from .model import ZINBPseudoLikelihoodGraphicalModel
 
 
 def run_inference(
-    model: ZINBGraphicalModel,
+    model: ZINBPseudoLikelihoodGraphicalModel,
     X: torch.Tensor,
     num_samples: int = 1000,
     warmup_steps: int = 500,
@@ -36,7 +34,7 @@ def run_inference(
     an adaptive variant of Hamiltonian Monte Carlo.
 
     Args:
-        model: ZINBGraphicalModel instance.
+        model: ZINBPseudoLikelihoodGraphicalModel instance.
         X: Count matrix of shape (n_samples, n_features).
         num_samples: Number of MCMC samples to draw from posterior.
         warmup_steps: Number of warmup/burn-in steps for adaptation.
@@ -48,8 +46,6 @@ def run_inference(
     Returns:
         Dictionary containing:
             - 'samples': Dictionary of posterior samples:
-                - 'theta' (θ): Transform exponent samples
-                - 'alpha' (α): Interaction exponent samples
                 - 'A_tril': Unconstrained interaction parameter samples
                 - 'mu' (μ): Mean parameter samples per feature
                 - 'phi' (φ): Dispersion parameter samples per feature
@@ -79,7 +75,6 @@ def run_inference(
     samples = mcmc.get_samples()
 
     A_tril_samples = samples["A_tril"]
-    alpha_samples = samples["alpha"]
 
     n_posterior_samples = A_tril_samples.shape[0]
     omega_samples = torch.zeros(
@@ -90,7 +85,7 @@ def run_inference(
     )
 
     for i in range(n_posterior_samples):
-        omega_samples[i] = model.get_omega(A_tril_samples[i], alpha_samples[i])
+        omega_samples[i] = model.get_omega(A_tril_samples[i])
 
     summary = compute_summary(samples, omega_samples)
 
@@ -111,8 +106,6 @@ def compute_summary(
 
     Args:
         samples: Dictionary of posterior samples containing:
-            - 'theta' (θ): Transform exponent
-            - 'alpha' (α): Interaction exponent
             - 'mu' (μ): Feature means
             - 'phi' (φ): Feature dispersions
             - 'pi_zero' (π): Zero-inflation probabilities
