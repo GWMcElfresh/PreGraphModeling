@@ -80,10 +80,10 @@ where each conditional is a ZINB distribution with mean adjusted by the interact
 
 ### Priors
 
-- A_ij ~ Normal(0, 1) for each element in lower triangle
-- μ_j ~ LogNormal(0, 1) for each feature
-- φ_j ~ LogNormal(0, 1) for each feature
-- π_j ~ Beta(1, 1) for each feature
+- A_tril ~ Normal(0, 1) - Unconstrained interaction parameters (lower triangular)
+- μ ~ LogNormal(0, 1) - Mean parameter for each feature
+- φ ~ LogNormal(0, 1) - Dispersion parameter for each feature
+- π ~ Beta(1, 1) - Zero-inflation probability for each feature
 
 ## Requirements
 
