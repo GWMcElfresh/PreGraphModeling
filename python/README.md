@@ -4,8 +4,7 @@ A PyTorch/Pyro implementation of a Zero-Inflated Negative Binomial (ZINB) graphi
 
 ## Features
 
-- **Learnable transform**: Applies F(X) = atan(X)^θ to stabilize dependence
-- **Symmetric negative interactions**: Parameterizes interactions via unconstrained matrix A mapped to negative, symmetric Ω using -|atan(A)|^α
+- **Symmetric interaction matrix**: Parameterizes conditional dependencies via unconstrained matrix A mapped to symmetric Ω with unit diagonal
 - **ZINB distribution**: Models count data with zero-inflation (μ, φ, π parameters)
 - **Pseudo-likelihood inference**: Avoids partition functions and truncated sums
 - **NUTS/HMC sampling**: Joint inference of all parameters using Pyro's NUTS kernel
@@ -49,31 +48,25 @@ results = run_inference(
 )
 
 # Access posterior samples
-theta_samples = results["samples"]["theta"]  # Transform parameter
-omega_samples = results["omega_samples"]     # Interaction matrix
+omega_samples = results["omega_samples"]     # Interaction matrix (n_samples, n_features, n_features)
 mu_samples = results["samples"]["mu"]        # ZINB mean parameters
 phi_samples = results["samples"]["phi"]      # ZINB dispersion parameters
 pi_samples = results["samples"]["pi_zero"]   # Zero-inflation probabilities
 
 # Summary statistics
 summary = results["summary"]
-print(f"Theta posterior mean: {summary['theta']['mean']:.3f}")
 print(f"Omega posterior mean:\n{summary['omega']['mean']}")
 ```
 
 ## Model Details
 
-### Transform Function
-
-The learnable transform F(X) = atan(X)^θ where θ > 0 is inferred from the data. This transform stabilizes dependence in the count data.
-
 ### Interaction Matrix
 
-The interaction matrix Ω is parameterized via an unconstrained matrix A:
-- Off-diagonal: Ω_ij = -|atan(A_ij)|^α for i ≠ j (negative interactions)
+The interaction matrix Ω is parameterized via an unconstrained matrix A with lower-triangular elements:
+- Off-diagonal: Ω_ij = A_ij for i ≠ j (symmetric interactions)
 - Diagonal: Ω_ii = 1 (fixed for identifiability)
 
-This ensures Ω is symmetric and negative off-diagonal.
+This ensures Ω is symmetric with unit diagonal, encoding conditional dependencies between features.
 
 ### Pseudo-Likelihood
 
@@ -85,12 +78,10 @@ where each conditional is a ZINB distribution with mean adjusted by the interact
 
 ### Priors
 
-- θ ~ LogNormal(0, 0.5)
-- α ~ LogNormal(0, 0.5)
-- A_ij ~ Normal(0, 1)
-- μ_j ~ LogNormal(0, 1)
-- φ_j ~ LogNormal(0, 1)
-- π_j ~ Beta(1, 1)
+- A_ij ~ Normal(0, 1) for each off-diagonal element
+- μ_j ~ LogNormal(0, 1) for each feature mean
+- φ_j ~ LogNormal(0, 1) for each feature dispersion
+- π_j ~ Beta(1, 1) for each feature zero-inflation probability
 
 ## Requirements
 
