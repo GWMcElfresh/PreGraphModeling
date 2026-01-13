@@ -28,7 +28,7 @@ class ZINBPseudoLikelihoodGraphicalModel(PyroModule):
     """
     Zero-Inflated Negative Binomial (ZINB) Graphical Model with Pseudo-Likelihood Inference.
 
-    The model use raw counts X for dependence and parameterizes interactions via an unconstrained matrix A
+    The model uses raw counts X for dependence and parameterizes interactions via an unconstrained matrix A
     mapped directly to a symmetric precision matrix Ω.
 
     Parameters are jointly inferred using NUTS/HMC on GPU.
@@ -117,7 +117,6 @@ class ZINBPseudoLikelihoodGraphicalModel(PyroModule):
         nb_dist = dist.NegativeBinomial(total_count=phi, logits=torch.log(mu / (phi + 1e-10)))
         nb_log_prob = nb_dist.log_prob(x)
 
-        is_zero = (x == 0).float()
         log_pi = torch.log(pi_zero + 1e-10)
         log_one_minus_pi = torch.log(1 - pi_zero + 1e-10)
 
