@@ -62,10 +62,5 @@ from .model import ZINBPseudoLikelihoodGraphicalModel
 from .inference import run_inference
 from .data import load_count_matrix
 
-__all__ = [
-    "ZINBPseudoLikelihoodGraphicalModel",
-    "run_inference",
-    "load_count_matrix",
-    "GPUNotAvailableWarning",
-]
-__version__ = "0.1.0"
+__all__ = ["ZINBPseudoLikelihoodGraphicalModel", "run_inference", "load_count_matrix"]
+__version__ = "0.1.1"
