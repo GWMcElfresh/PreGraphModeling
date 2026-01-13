@@ -4,7 +4,7 @@ A PyTorch/Pyro implementation of a Zero-Inflated Negative Binomial (ZINB) graphi
 
 ## Features
 
-- **Symmetric interaction matrix**: Parameterizes interactions via unconstrained matrix A mapped directly to symmetric Ω with unit diagonal
+- **Symmetric interaction matrix**: Parameterizes conditional dependencies via unconstrained matrix A mapped to symmetric Ω with unit diagonal
 - **ZINB distribution**: Models count data with zero-inflation (μ, φ, π parameters)
 - **Pseudo-likelihood inference**: Avoids partition functions and truncated sums
 - **NUTS/HMC sampling**: Joint inference of all parameters using Pyro's NUTS kernel
