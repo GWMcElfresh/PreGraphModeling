@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "zinb_graphical_model"
-version = "0.1.0"
+version = "0.1.1"
 description = "ZINB Graphical Model with PyTorch/Pyro using pseudo-likelihood inference"
 readme = "README.md"
 license = {text = "GPL-3.0"}

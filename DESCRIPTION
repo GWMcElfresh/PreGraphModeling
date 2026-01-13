@@ -1,7 +1,7 @@
 Package: PreGraphModeling
 Type: Package
 Title: Subsetting and Zero-Inflated Modeling for Single Cell Data
-Version: 0.1.0
+Version: 0.1.1
 Authors@R: person("GW", "McElfresh", email = "mcelfreshgw@gmail.com", role = c("aut", "cre"))
 Description: Tools for subsetting Seurat objects according to metadata columns and 
     fitting zero-inflated negative binomial models to estimate distribution parameters.
