@@ -23,12 +23,14 @@ import pyro
 import pyro.distributions as dist
 from pyro.nn import PyroModule
 
+from . import _check_gpu_availability
+
 
 class ZINBPseudoLikelihoodGraphicalModel(PyroModule):
     """
     Zero-Inflated Negative Binomial (ZINB) Graphical Model with Pseudo-Likelihood Inference.
 
-    The model use raw counts X for dependence and parameterizes interactions via an unconstrained matrix A
+    The model uses raw counts X for dependence and parameterizes interactions via an unconstrained matrix A
     mapped directly to a symmetric precision matrix Ω.
 
     Parameters are jointly inferred using NUTS/HMC on GPU.
@@ -52,6 +54,11 @@ class ZINBPseudoLikelihoodGraphicalModel(PyroModule):
         """
         super().__init__()
         self.n_features = n_features
+        
+        # Check GPU availability and warn if in CPU-only mode
+        if device == "cuda":
+            _check_gpu_availability()
+        
         available_device = device if torch.cuda.is_available() else "cpu"
         self.device = torch.device(available_device)
         self.n_interaction_params = (n_features * (n_features - 1)) // 2
@@ -117,7 +124,6 @@ class ZINBPseudoLikelihoodGraphicalModel(PyroModule):
         nb_dist = dist.NegativeBinomial(total_count=phi, logits=torch.log(mu / (phi + 1e-10)))
         nb_log_prob = nb_dist.log_prob(x)
 
-        is_zero = (x == 0).float()
         log_pi = torch.log(pi_zero + 1e-10)
         log_one_minus_pi = torch.log(1 - pi_zero + 1e-10)
 
