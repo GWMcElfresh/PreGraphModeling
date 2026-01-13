@@ -48,6 +48,7 @@ install.packages(c("progressr", "viridisLite", "igraph"))
 library(PreGraphModeling)
 library(Seurat)
 library(ComplexHeatmap)
+library(pheatmap)
 ```
 
 ## Basic Workflow
@@ -293,8 +294,8 @@ heatmap_weights <- PlotRBMWeightsHeatmap(
 draw(heatmap_weights)
 ```
 
-```{r fig.width = 15}
-pheatmap(t(rbm$weights_per_layer$seurat_annotations[which(rowSums(scale(rbm$weights_per_layer$seurat_annotations)) > 6),]), 
+```{r fig.width = 15, eval = FALSE}
+pheatmap::pheatmap(t(rbm$weights_per_layer$seurat_annotations[which(rowSums(scale(rbm$weights_per_layer$seurat_annotations)) > 6),]), 
          cluster_rows=TRUE, cluster_cols=TRUE, scale = 'row', 
          color = colorRampPalette(c("blue", "white", "red"))(100), 
          main = "RBM Weights: Features to Cell Types", name = "Scaled Weight")
@@ -329,7 +330,7 @@ ggplot(pca_df, aes(x = PC1, y = PC2, label = Factor)) +
 
 
 
-```{r}
+```{r eval = FALSE}
 colSums(abs(rbm$weights_per_layer$seurat_annotations)) 
 
 ```
@@ -443,7 +444,7 @@ reconstructed_specific %>%
 
 # Hybrid states
 
-```{r}
+```{r eval = FALSE}
 hidden_vals <- matrix(c(0, 0, 0, 0 , 0 , 0 , 0 ,0, 0 ), nrow = 1, ncol = 9)
 colnames(hidden_vals) <- paste0("seurat_annotations_", levels(pbmc3k@meta.data$seurat_annotations) )
 
@@ -461,7 +462,7 @@ reconstructed_specific %>%
   ggtitle("Top 20 Genes Activated in Null Cell Type State")
 ```
 
-```{r}
+```{r eval = FALSE}
 hidden_vals <- matrix(c(1, 1, 1, 1 , 1 , 1 , 1 ,1, 1 ), nrow = 1, ncol = 9)
 colnames(hidden_vals) <- paste0("seurat_annotations_", levels(pbmc3k@meta.data$seurat_annotations) )
 
