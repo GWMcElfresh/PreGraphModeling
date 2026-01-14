@@ -42,7 +42,8 @@ ENV PREGRAPHMODELING_DOCKER_MODE=cpu
 # Using pip with --extra-index-url for PyTorch CUDA wheels
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir --break-system-packages --index-url https://download.pytorch.org/whl/cpu \
-        torch>=2.6.0 \
+        torch>=2.6.0 && \
+    pip install --no-cache-dir --break-system-packages \
         pyro-ppl>=1.8.0 \
         numpy>=1.20.0 \
         pytest>=7.0.0 && \
