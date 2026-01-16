@@ -56,11 +56,16 @@ def run_inference(
     """
     pyro.clear_param_store()
 
+    # Use init_to_median for more robust initialization
+    # This helps avoid invalid initial parameter combinations
+    from pyro.infer.autoguide.initialization import init_to_median
+    
     nuts_kernel = NUTS(
         model.model,
         target_accept_prob=target_accept_prob,
         max_tree_depth=max_tree_depth,
         jit_compile=jit_compile,
+        init_strategy=init_to_median(num_samples=10),
     )
 
     mcmc = MCMC(

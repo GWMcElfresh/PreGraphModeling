@@ -5,12 +5,16 @@ This module implements a Zero-Inflated Negative Binomial graphical model
 parameterized via:
 - Interaction matrix via unconstrained A mapped directly to symmetric Ω (Omega)
   with unit diagonal
-- Joint inference of θ, Ω, and ZINB parameters (μ, φ, π) using NUTS/HMC
+- Scaling factors γ (gamma) that control how interactions affect each parameter
+- Joint inference of θ, Ω, γ, and ZINB parameters (μ, φ, π) using NUTS/HMC
 
 Greek Parameters:
     Ω (Omega): Symmetric interaction/precision matrix with off-diagonal
                entries and unit diagonal. Encodes conditional dependencies between
                features in the graphical model.
+    γ_μ (gamma_mu): Scaling factor for how Ω affects the mean μ.
+    γ_φ (gamma_phi): Scaling factor for how Ω affects the dispersion φ.
+    γ_π (gamma_pi): Scaling factor for how Ω affects zero-inflation π.
     μ (mu): Mean parameter of the ZINB distribution for each feature. Must be positive.
     φ (phi): Dispersion parameter of the negative binomial component. Also known as
              'r' or 'size'. Larger values indicate less overdispersion. Must be positive.
@@ -37,8 +41,11 @@ class ZINBPseudoLikelihoodGraphicalModel(PyroModule):
 
     Model Parameters:
         A: Unconstrained lower-triangular matrix mapped to Ω.
-           Prior: Normal(0, 1) for each element.
+           Prior: Normal(0, 0.1) for each element.
         Ω (Omega): Resulting symmetric interaction matrix.
+        γ_μ (gamma_mu): Scaling for μ interactions. Prior: Normal(1, 0.5).
+        γ_φ (gamma_phi): Scaling for φ interactions. Prior: Normal(0, 0.5).
+        γ_π (gamma_pi): Scaling for π interactions. Prior: Normal(0, 0.5).
         μ (mu): ZINB mean for each feature. Prior: LogNormal(0, 1).
         φ (phi): ZINB dispersion for each feature. Prior: LogNormal(0, 1).
         π (pi_zero): Zero-inflation probability per feature. Prior: Beta(1, 1).
@@ -121,11 +128,25 @@ class ZINBPseudoLikelihoodGraphicalModel(PyroModule):
         Returns:
             Log probability log P(x | μ, φ, π) under ZINB.
         """
-        nb_dist = dist.NegativeBinomial(total_count=phi, logits=torch.log(mu / (phi + 1e-10)))
+        # Ensure numerical stability with clamping
+        mu_safe = torch.clamp(mu, min=1e-6, max=1e6)
+        phi_safe = torch.clamp(phi, min=1e-6, max=1e6)
+        
+        # Compute logits with numerical stability
+        # logits = log(mu / phi) = log(mu) - log(phi)
+        logits = torch.log(mu_safe) - torch.log(phi_safe)
+        logits = torch.clamp(logits, min=-20.0, max=20.0)  # Prevent extreme logits
+        
+        nb_dist = dist.NegativeBinomial(total_count=phi_safe, logits=logits)
         nb_log_prob = nb_dist.log_prob(x)
+        
+        # Clamp NB log prob to avoid -inf
+        nb_log_prob = torch.clamp(nb_log_prob, min=-100.0)
 
-        log_pi = torch.log(pi_zero + 1e-10)
-        log_one_minus_pi = torch.log(1 - pi_zero + 1e-10)
+        # Clamp pi_zero to valid range
+        pi_safe = torch.clamp(pi_zero, min=1e-6, max=1.0 - 1e-6)
+        log_pi = torch.log(pi_safe)
+        log_one_minus_pi = torch.log(1 - pi_safe)
 
         log_prob = torch.where(
             x == 0,
@@ -142,13 +163,20 @@ class ZINBPseudoLikelihoodGraphicalModel(PyroModule):
         mu: torch.Tensor,
         phi: torch.Tensor,
         pi_zero: torch.Tensor,
+        gamma_mu: torch.Tensor,
+        gamma_phi: torch.Tensor,
+        gamma_pi: torch.Tensor,
     ) -> torch.Tensor:
         """
         Compute pseudo-log-likelihood for the graphical model.
 
         Pseudo-likelihood avoids partition functions by conditioning on all
         other variables. For each feature j:
-            P(X_j | X_{-j}) = ZINB(X_j | μ_j · exp(Ω_{j,-j} @ X_{-j}), φ_j, π_j)
+            effect_j = Ω_{j,-j} @ X_{-j}
+            μ_j^cond = μ_j · exp(γ_μ · effect_j)
+            φ_j^cond = φ_j · exp(γ_φ · effect_j)
+            π_j^cond = σ(logit(π_j) + γ_π · effect_j)
+            P(X_j | X_{-j}) = ZINB(X_j | μ_j^cond, φ_j^cond, π_j^cond)
 
         This approximation is computationally tractable and provides consistent
         parameter estimates for graphical models.
@@ -158,8 +186,11 @@ class ZINBPseudoLikelihoodGraphicalModel(PyroModule):
             Omega (Ω): Interaction matrix of shape (n_features, n_features).
                        Encodes conditional dependencies between features.
             mu (μ): Base mean parameters of shape (n_features,) for each feature.
-            phi (φ): Dispersion parameters of shape (n_features,) for each feature.
-            pi_zero (π): Zero-inflation probabilities of shape (n_features,).
+            phi (φ): Base dispersion parameters of shape (n_features,) for each feature.
+            pi_zero (π): Base zero-inflation probabilities of shape (n_features,).
+            gamma_mu (γ_μ): Scalar scaling factor for μ interactions.
+            gamma_phi (γ_φ): Scalar scaling factor for φ interactions.
+            gamma_pi (γ_π): Scalar scaling factor for π interactions.
 
         Returns:
             Total pseudo-log-likelihood (scalar) summed over all features and samples.
@@ -175,11 +206,28 @@ class ZINBPseudoLikelihoodGraphicalModel(PyroModule):
             X_minus_j = X[:, mask]
             Omega_j_minus_j = Omega[j, mask]
 
-            conditional_effect = X_minus_j @ Omega_j_minus_j
-            conditional_mu = (mu[j] + 1e-10) * torch.exp(conditional_effect)
-            conditional_mu = torch.clamp(conditional_mu, min=1e-10)
+            # Compute the shared interaction effect
+            effect = X_minus_j @ Omega_j_minus_j
+            # Clamp the effect BEFORE scaling to prevent overflow
+            effect = torch.clamp(effect, min=-10.0, max=10.0)
+            
+            # Conditional μ: log-link (exp transform)
+            conditional_mu = mu[j] * torch.exp(gamma_mu * effect)
+            conditional_mu = torch.clamp(conditional_mu, min=1e-6, max=1e6)
+            
+            # Conditional φ: log-link (exp transform)
+            conditional_phi = phi[j] * torch.exp(gamma_phi * effect)
+            conditional_phi = torch.clamp(conditional_phi, min=1e-6, max=1e6)
+            
+            # Conditional π: logit-link (sigmoid transform)
+            # logit(pi) = log(pi / (1 - pi))
+            pi_j_safe = torch.clamp(pi_zero[j], min=1e-6, max=1.0 - 1e-6)
+            logit_pi = torch.log(pi_j_safe / (1 - pi_j_safe))
+            conditional_logit_pi = logit_pi + gamma_pi * effect
+            conditional_logit_pi = torch.clamp(conditional_logit_pi, min=-10.0, max=10.0)
+            conditional_pi = torch.sigmoid(conditional_logit_pi)
 
-            log_prob_j = self._zinb_log_prob(X[:, j], conditional_mu, phi[j], pi_zero[j])
+            log_prob_j = self._zinb_log_prob(X[:, j], conditional_mu, conditional_phi, conditional_pi)
             total_log_prob = total_log_prob + log_prob_j.sum()
 
         return total_log_prob
@@ -192,7 +240,10 @@ class ZINBPseudoLikelihoodGraphicalModel(PyroModule):
         All parameters are jointly inferred via NUTS/HMC.
 
         Priors:
-            A ~ Normal(0, 1): Unconstrained interaction parameters
+            A ~ Normal(0, 0.1): Unconstrained interaction parameters
+            γ_μ (gamma_mu) ~ Normal(1, 0.5): Scaling for mean interactions
+            γ_φ (gamma_phi) ~ Normal(0, 0.5): Scaling for dispersion interactions
+            γ_π (gamma_pi) ~ Normal(0, 0.5): Scaling for zero-inflation interactions
             μ (mu) ~ LogNormal(0, 1): Feature means
             φ (phi) ~ LogNormal(0, 1): Feature dispersions
             π (pi_zero) ~ Beta(1, 1): Zero-inflation probabilities
@@ -202,14 +253,35 @@ class ZINBPseudoLikelihoodGraphicalModel(PyroModule):
         """
         n_samples, n_features = X.shape
 
+        # Use tighter prior to prevent extreme initial interaction values
+        # that could cause numerical overflow in exp(X @ Omega)
         A_tril = pyro.sample(
             "A_tril",
             dist.Normal(
-                torch.zeros(self.n_interaction_params, device=self.device), 1.0
+                torch.zeros(self.n_interaction_params, device=self.device), 0.1
             ).to_event(1),
         )
 
         Omega = self._build_omega(A_tril)
+
+        # Gamma scaling factors for multi-parameter interactions
+        # gamma_mu centered at 1.0 (default behavior: interactions affect mu)
+        gamma_mu = pyro.sample(
+            "gamma_mu",
+            dist.Normal(torch.tensor(1.0, device=self.device), 0.5),
+        )
+        
+        # gamma_phi centered at 0.0 (default: no dispersion interactions)
+        gamma_phi = pyro.sample(
+            "gamma_phi",
+            dist.Normal(torch.tensor(0.0, device=self.device), 0.5),
+        )
+        
+        # gamma_pi centered at 0.0 (default: no zero-inflation interactions)
+        gamma_pi = pyro.sample(
+            "gamma_pi",
+            dist.Normal(torch.tensor(0.0, device=self.device), 0.5),
+        )
 
         with pyro.plate("features", n_features):
             mu = pyro.sample(
@@ -230,7 +302,9 @@ class ZINBPseudoLikelihoodGraphicalModel(PyroModule):
                 ),
             )
 
-        pseudo_ll = self._pseudo_log_likelihood(X, Omega, mu, phi, pi_zero)
+        pseudo_ll = self._pseudo_log_likelihood(
+            X, Omega, mu, phi, pi_zero, gamma_mu, gamma_phi, gamma_pi
+        )
         pyro.factor("pseudo_likelihood", pseudo_ll)
 
     def get_omega(
