@@ -192,7 +192,13 @@ class TestZINBPseudoLikelihoodGraphicalModel:
         phi = torch.ones(n_features) * 2.0
         pi_zero = torch.ones(n_features) * 0.2
 
-        pll = model._pseudo_log_likelihood(X, Omega, mu, phi, pi_zero)
+        gamma_mu = torch.tensor(1.0)
+        gamma_phi = torch.tensor(0.0)
+        gamma_pi = torch.tensor(0.0)
+
+        pll = model._pseudo_log_likelihood(
+            X, Omega, mu, phi, pi_zero, gamma_mu, gamma_phi, gamma_pi
+        )
 
         assert torch.isfinite(pll)
 
