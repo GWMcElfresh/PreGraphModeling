@@ -27,14 +27,51 @@ os.path.dirname(os.path.abspath("."))
 # %pip install --index-url https://download.pytorch.org/whl/cu118 torch torchvision torchaudio --break-system-packages
 
 import warnings
+import math
 import numpy as np
-import pandas as pd
 import torch
 import pyro
-import matplotlib.pyplot as plt
-import seaborn as sns
-import networkx as nx
+
+# Optional (tutorial/visualization) dependencies
+try:
+    import pandas as pd
+except Exception:  # pragma: no cover
+    pd = None
+
+try:
+    import matplotlib.pyplot as plt
+except Exception:  # pragma: no cover
+    plt = None
+
+try:
+    import seaborn as sns
+except Exception:  # pragma: no cover
+    sns = None
+
+try:
+    import networkx as nx
+except Exception:  # pragma: no cover
+    nx = None
 from pathlib import Path
+
+# -------------------------------
+# Output/verbosity configuration
+# -------------------------------
+QUIET = False  # Set True to silence console output
+OUTPUT_DIR = Path("./outputs")
+FORCE_DEVICE = "cuda"  # Set to "cuda", "mps", or "cpu" to override auto-detect
+
+if QUIET:
+    def print(*args, **kwargs):  # noqa: A001
+        return
+
+
+def save_plot(filename: str):
+    if plt is None:
+        return
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    plt.savefig(OUTPUT_DIR / filename, dpi=300, bbox_inches="tight")
+    plt.close()
 
 # Import our package
 from zinb_graphical_model import (
@@ -43,9 +80,11 @@ from zinb_graphical_model import (
     load_count_matrix,
 )
 
-# Set plot style
-sns.set_style("whitegrid")
-plt.rcParams['figure.figsize'] = (10, 6)
+# Set plot style (if plotting stack is available)
+if sns is not None:
+    sns.set_style("whitegrid")
+if plt is not None:
+    plt.rcParams['figure.figsize'] = (10, 6)
 
 print(f"PyTorch version: {torch.__version__}")
 print(f"Pyro version: {pyro.__version__}")
@@ -78,6 +117,26 @@ def get_best_device():
         print(f"Current device: {torch.cuda.current_device()}")
     print("---------------------\n")
     # --- Debugging End ---
+
+    if FORCE_DEVICE:
+        force = FORCE_DEVICE.lower()
+        if force == "cuda":
+            if not torch.cuda.is_available():
+                raise RuntimeError("FORCE_DEVICE='cuda' but CUDA is not available.")
+            torch.cuda.set_device(0)
+            device = "cuda"
+            device_name = torch.cuda.get_device_name(0)
+            print(f"✓ CUDA forced: {device_name}")
+            return device
+        if force == "mps":
+            if not torch.backends.mps.is_available():
+                raise RuntimeError("FORCE_DEVICE='mps' but MPS is not available.")
+            print("✓ MPS forced")
+            return "mps"
+        if force == "cpu":
+            print("✓ CPU forced")
+            return "cpu"
+        raise ValueError("FORCE_DEVICE must be one of: 'cuda', 'mps', 'cpu', or None")
 
     if torch.cuda.is_available():
         device = "cuda"
@@ -224,92 +283,440 @@ def generate_synthetic_counts(
     return counts, gene_names, true_omega
 
 
-# Generate synthetic data with multi-parameter interactions
-N_CELLS = 300
-N_GENES = 100
+def main():
+    # Generate synthetic data with multi-parameter interactions
+    # NOTE: Full MCMC scales poorly with number of genes.
+    # Use env vars to override defaults for larger runs.
+    N_CELLS = int(os.getenv("N_CELLS", "300"))
+    N_GENES = int(os.getenv("N_GENES", "20"))
+    PLOT_MAX_GENES = int(os.getenv("PLOT_MAX_GENES", "20"))
 
-# Define expected scaling factors (ground truth)
-TRUE_GAMMA_MU = 1.0    # Interactions strongly affect mean
-TRUE_GAMMA_PHI = 0.5   # Interactions moderately affect dispersion
-TRUE_GAMMA_PI = -0.5   # Interactions negatively affect dropout (higher interaction -> lower dropout)
+    # Define expected scaling factors (ground truth)
+    TRUE_GAMMA_MU = 1.0    # Interactions strongly affect mean
+    TRUE_GAMMA_PHI = 0.5   # Interactions moderately affect dispersion
+    TRUE_GAMMA_PI = -0.5   # Interactions negatively affect dropout (higher interaction -> lower dropout)
 
-counts, gene_names, true_omega = generate_synthetic_counts(
-    n_cells=N_CELLS,
-    n_genes=N_GENES,
-    base_mean=5.0,
-    base_dispersion=2.0,
-    base_zero_inflation=0.2,
-    gamma_mu=TRUE_GAMMA_MU,
-    gamma_phi=TRUE_GAMMA_PHI,
-    gamma_pi=TRUE_GAMMA_PI,
-)
+    counts, gene_names, true_omega = generate_synthetic_counts(
+        n_cells=N_CELLS,
+        n_genes=N_GENES,
+        base_mean=5.0,
+        base_dispersion=2.0,
+        base_zero_inflation=0.2,
+        gamma_mu=TRUE_GAMMA_MU,
+        gamma_phi=TRUE_GAMMA_PHI,
+        gamma_pi=TRUE_GAMMA_PI,
+    )
 
-print(f"Generated count matrix: {counts.shape[0]} cells × {counts.shape[1]} genes")
-print(f"Gene names: {gene_names}")
-print(f"\nCount statistics:")
-print(f"  Total counts: {counts.sum():,}")
-print(f"  Sparsity (% zeros): {100 * (counts == 0).mean():.1f}%")
-print(f"  Mean count: {counts.mean():.2f}")
-print(f"  Max count: {counts.max()}")
+    print(f"Generated count matrix: {counts.shape[0]} cells × {counts.shape[1]} genes")
+    print(f"Gene names: {gene_names}")
+    print(f"\nCount statistics:")
+    print(f"  Total counts: {counts.sum():,}")
+    print(f"  Sparsity (% zeros): {100 * (counts == 0).mean():.1f}%")
+    print(f"  Mean count: {counts.mean():.2f}")
+    print(f"  Max count: {counts.max()}")
 
-# Visualize the true interaction matrix
-fig, ax = plt.subplots(figsize=(8, 6))
-sns.heatmap(
-    true_omega,
-    annot=False,
-    fmt=".2f",
-    cmap="RdBu_r",
-    center=0,
-    xticklabels=gene_names,
-    yticklabels=gene_names,
-    ax=ax,
-    vmin=-1,
-    vmax=1,
-)
-ax.set_title("Ground Truth Interaction Matrix (Ω)")
-plt.tight_layout()
-plt.show()
+    # Visualize the true interaction matrix
+    if plt is not None and sns is not None:
+        fig, ax = plt.subplots(figsize=(8, 6))
+        sns.heatmap(
+            true_omega,
+            annot=False,
+            fmt=".2f",
+            cmap="RdBu_r",
+            center=0,
+            xticklabels=gene_names if len(gene_names) <= 30 else False,
+            yticklabels=gene_names if len(gene_names) <= 30 else False,
+            ax=ax,
+            vmin=-1,
+            vmax=1,
+        )
+        ax.set_title("Ground Truth Interaction Matrix (Ω)")
+        plt.tight_layout()
+        save_plot("true_interaction_matrix.png")
+    else:
+        print("Skipping plots: install matplotlib+seaborn to enable visualization.")
 
-# Save and Load Data as CSV
-# The package supports CSV, TSV, NPY, and NPZ formats.
+    # Save and Load Data as CSV
+    # The package supports CSV, TSV, NPY, and NPZ formats.
 
-# Save to CSV (you can replace this file with real scRNA-seq data later)
-DATA_PATH = Path("./synthetic_counts.csv")
+    # Save to CSV (you can replace this file with real scRNA-seq data later)
+    DATA_PATH = Path("./synthetic_counts.csv")
 
-# Create DataFrame with gene names as columns
-df = pd.DataFrame(counts, columns=gene_names)
-df.to_csv(DATA_PATH, index=False)
+    # Write CSV with header row (works without pandas)
+    header = ",".join(gene_names)
+    np.savetxt(DATA_PATH, counts, delimiter=",", header=header, comments="", fmt="%d")
 
-print(f"Saved count matrix to: {DATA_PATH.absolute()}")
-print(f"\nFile preview:")
-print(df.head())
+    print(f"Saved count matrix to: {DATA_PATH.absolute()}")
+    print(f"\nFile preview:")
+    if pd is not None:
+        df = pd.read_csv(DATA_PATH)
+        print(df.head())
+    else:
+        print(counts[:5, :min(5, counts.shape[1])])
 
-# Load the count matrix using our package's loader
-# This will be the main entry point when using real data
+    # Load the count matrix using our package's loader
+    # This will be the main entry point when using real data
 
-X = load_count_matrix(str(DATA_PATH), device="cpu")  # Load to CPU first
+    X = load_count_matrix(str(DATA_PATH), device="cpu")  # Load to CPU first
 
-print(f"Loaded tensor shape: {X.shape}")
-print(f"Tensor dtype: {X.dtype}")
-print(f"Device: {X.device}")
+    print(f"Loaded tensor shape: {X.shape}")
+    print(f"Tensor dtype: {X.dtype}")
+    print(f"Device: {X.device}")
 
-# Visualize count distributions
-fig, axes = plt.subplots(2, 4, figsize=(14, 6))
-axes = axes.flatten()
+    # Visualize count distributions (subset for readability)
+    n_genes = len(gene_names)
+    n_plot = min(PLOT_MAX_GENES, n_genes)
+    if plt is not None:
+        n_cols = min(4, n_plot) if n_plot > 0 else 1
+        n_rows = math.ceil(n_plot / n_cols) if n_plot > 0 else 1
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(14, 3 * n_rows), squeeze=False)
+        axes = axes.flatten()
 
-for i, gene in enumerate(gene_names):
-    ax = axes[i]
-    gene_counts = counts[:, i]
-    ax.hist(gene_counts, bins=20, edgecolor='black', alpha=0.7)
-    ax.axvline(gene_counts.mean(), color='red', linestyle='--', label=f'mean={gene_counts.mean():.1f}')
-    ax.set_xlabel('Count')
-    ax.set_ylabel('Frequency')
-    ax.set_title(gene)
-    ax.legend(fontsize=8)
+        for i in range(n_plot):
+            gene = gene_names[i]
+            ax = axes[i]
+            gene_counts = counts[:, i]
+            ax.hist(gene_counts, bins=20, edgecolor='black', alpha=0.7)
+            ax.axvline(gene_counts.mean(), color='red', linestyle='--', label=f'mean={gene_counts.mean():.1f}')
+            ax.set_xlabel('Count')
+            ax.set_ylabel('Frequency')
+            ax.set_title(gene)
+            ax.legend(fontsize=8)
 
-plt.suptitle('Count Distributions per Gene', fontsize=14)
-plt.tight_layout()
-plt.show()
+        # Hide any unused subplots
+        for j in range(n_plot, len(axes)):
+            axes[j].axis('off')
+
+        plt.suptitle('Count Distributions per Gene', fontsize=14)
+        plt.tight_layout()
+        save_plot("count_distributions_per_gene.png")
+
+    # ============================================================
+    # 4. Model Setup
+    # ============================================================
+    model, X_device = setup_model_and_data(X, DEVICE)
+
+    print(f"\nPriors (from model implementation):")
+    print(f"  - A_tril (interaction params): Normal(0, 0.1)")
+    print(f"  - γ_μ (mean scaling): Normal(1, 0.5)")
+    print(f"  - γ_φ (dispersion scaling): Normal(0, 0.5)")
+    print(f"  - γ_π (zero-inflation scaling): Normal(0, 0.5)")
+    print(f"  - μ (mean): LogNormal(0, 1)")
+    print(f"  - φ (dispersion): LogNormal(0, 1)")
+    print(f"  - π (zero-inflation): Beta(1, 1)")
+
+    # ============================================================
+    # 5. MCMC Inference
+    # ============================================================
+    # Keep defaults small for a runnable tutorial. Override with env vars for real runs.
+    NUM_SAMPLES = int(os.getenv("NUM_SAMPLES", "100"))
+    WARMUP_STEPS = int(os.getenv("WARMUP_STEPS", "50"))
+    NUM_CHAINS = int(os.getenv("NUM_CHAINS", "1"))
+    TARGET_ACCEPT = float(os.getenv("TARGET_ACCEPT", "0.8"))
+    MAX_TREE_DEPTH = int(os.getenv("MAX_TREE_DEPTH", "10"))
+    JIT_COMPILE = os.getenv("JIT_COMPILE", "0").lower() in {"1", "true", "yes"}
+
+    print("\nInference settings:")
+    print(f"  - Posterior samples: {NUM_SAMPLES}")
+    print(f"  - Warmup steps: {WARMUP_STEPS}")
+    print(f"  - Chains: {NUM_CHAINS}")
+    print(f"  - Target acceptance: {TARGET_ACCEPT}")
+    print(f"  - Max tree depth: {MAX_TREE_DEPTH}")
+    print(f"  - JIT compile: {JIT_COMPILE}")
+    if N_GENES >= 50:
+        print("\n⚠️  N_GENES is large; MCMC may take a long time.")
+        print("   Consider setting env vars like N_GENES=20, NUM_SAMPLES=100, WARMUP_STEPS=50.")
+
+    print("=" * 60)
+    print("Starting MCMC Inference")
+    print("=" * 60 + "\n")
+    results, actual_device = run_inference_with_fallback(
+        model,
+        X_device,
+        num_samples=NUM_SAMPLES,
+        warmup_steps=WARMUP_STEPS,
+        num_chains=NUM_CHAINS,
+        target_accept_prob=TARGET_ACCEPT,
+        max_tree_depth=MAX_TREE_DEPTH,
+        jit_compile=JIT_COMPILE,
+    )
+    print(f"\nInference ran on: {actual_device}")
+
+    # ============================================================
+    # 6. Posterior Analysis
+    # ============================================================
+    samples = results["samples"]
+    omega_samples = results["omega_samples"]
+    summary = results["summary"]
+
+    print("\nPosterior samples available:")
+    for key, val in samples.items():
+        print(f"  - {key}: shape {tuple(val.shape)}")
+    print(f"  - omega_samples: shape {tuple(omega_samples.shape)}")
+
+    print("\n" + "=" * 60)
+    print("POSTERIOR SUMMARY")
+    print("=" * 60)
+
+    n_show = min(10, len(gene_names))
+    if len(gene_names) > n_show:
+        print(f"(Showing first {n_show} genes; set N_GENES/PLOT_MAX_GENES as needed)\n")
+
+    mu_mean = summary["mu"]["mean"]
+    mu_std = summary["mu"]["std"]
+    print("μ (Mean) parameters:")
+    for i in range(n_show):
+        print(f"  {gene_names[i]}: {mu_mean[i]:.2f} ± {mu_std[i]:.2f}")
+
+    phi_mean = summary["phi"]["mean"]
+    phi_std = summary["phi"]["std"]
+    print("\nφ (Dispersion) parameters:")
+    for i in range(n_show):
+        print(f"  {gene_names[i]}: {phi_mean[i]:.2f} ± {phi_std[i]:.2f}")
+
+    pi_mean = summary["pi_zero"]["mean"]
+    pi_std = summary["pi_zero"]["std"]
+    print("\nπ (Zero-inflation) parameters:")
+    for i in range(n_show):
+        print(f"  {gene_names[i]}: {pi_mean[i]:.3f} ± {pi_std[i]:.3f}")
+
+    # Posterior distributions (plot a subset to keep figures readable)
+    if plt is not None:
+        n_plot = min(PLOT_MAX_GENES, len(gene_names))
+        fig, axes = plt.subplots(3, 1, figsize=(12, 15))
+
+        ax = axes[0]
+        mu_samples = samples["mu"].cpu().numpy()
+        for i in range(n_plot):
+            ax.hist(mu_samples[:, i], bins=20, alpha=0.5, label=gene_names[i])
+        ax.set_xlabel("μ (Mean)")
+        ax.set_ylabel("Frequency")
+        ax.set_title("Posterior Distribution of Mean Parameters (μ)")
+        if n_plot <= 12:
+            ax.legend(bbox_to_anchor=(1.02, 1), loc='upper left')
+
+        ax = axes[1]
+        phi_samples = samples["phi"].cpu().numpy()
+        for i in range(n_plot):
+            ax.hist(phi_samples[:, i], bins=20, alpha=0.5, label=gene_names[i])
+        ax.set_xlabel("φ (Dispersion)")
+        ax.set_ylabel("Frequency")
+        ax.set_title("Posterior Distribution of Dispersion Parameters (φ)")
+        if n_plot <= 12:
+            ax.legend(bbox_to_anchor=(1.02, 1), loc='upper left')
+
+        ax = axes[2]
+        pi_samples = samples["pi_zero"].cpu().numpy()
+        for i in range(n_plot):
+            ax.hist(pi_samples[:, i], bins=20, alpha=0.5, label=gene_names[i])
+        ax.set_xlabel("π (Zero-inflation probability)")
+        ax.set_ylabel("Frequency")
+        ax.set_title("Posterior Distribution of Zero-Inflation Parameters (π)")
+        if n_plot <= 12:
+            ax.legend(bbox_to_anchor=(1.02, 1), loc='upper left')
+
+        plt.tight_layout()
+        save_plot("posterior_zinb_parameters.png")
+
+    gamma_mu = samples["gamma_mu"].cpu().numpy().flatten()
+    gamma_phi = samples["gamma_phi"].cpu().numpy().flatten()
+    gamma_pi = samples["gamma_pi"].cpu().numpy().flatten()
+
+    if plt is not None:
+        fig, ax = plt.subplots(figsize=(10, 6))
+        if sns is not None:
+            sns.kdeplot(gamma_mu, fill=True, label=f"γ_μ: {gamma_mu.mean():.2f} ± {gamma_mu.std():.2f}", ax=ax)
+            sns.kdeplot(gamma_phi, fill=True, label=f"γ_φ: {gamma_phi.mean():.2f} ± {gamma_phi.std():.2f}", ax=ax)
+            sns.kdeplot(gamma_pi, fill=True, label=f"γ_π: {gamma_pi.mean():.2f} ± {gamma_pi.std():.2f}", ax=ax)
+        else:
+            ax.hist(gamma_mu, bins=30, alpha=0.5, label="γ_μ")
+            ax.hist(gamma_phi, bins=30, alpha=0.5, label="γ_φ")
+            ax.hist(gamma_pi, bins=30, alpha=0.5, label="γ_π")
+
+        ax.axvline(TRUE_GAMMA_MU, color="gray", linestyle="--", alpha=0.5, label=f"True γ_μ = {TRUE_GAMMA_MU}")
+        ax.axvline(0.0, color="gray", linestyle=":", alpha=0.5, label="γ = 0 (independence)")
+        ax.set_title("Posterior Distribution of Scaling Factors (γ)")
+        ax.set_xlabel("Value")
+        ax.legend()
+        plt.tight_layout()
+        save_plot("gamma_scaling_factors.png")
+
+    print("\nRecovered Scaling Factors:")
+    print(f"  γ_μ (True={TRUE_GAMMA_MU}): {gamma_mu.mean():.3f}")
+    print(f"  γ_φ (True={TRUE_GAMMA_PHI}): {gamma_phi.mean():.3f}")
+    print(f"  γ_π (True={TRUE_GAMMA_PI}): {gamma_pi.mean():.3f}")
+
+    omega_mean = summary["omega"]["mean"]
+    omega_std = summary["omega"]["std"]
+    show_ticks = len(gene_names) <= 30
+
+    if plt is not None and sns is not None:
+        fig, axes = plt.subplots(1, 3, figsize=(16, 5))
+        sns.heatmap(
+            true_omega,
+            annot=False,
+            cmap="RdBu_r",
+            center=0,
+            xticklabels=gene_names if show_ticks else False,
+            yticklabels=gene_names if show_ticks else False,
+            ax=axes[0],
+            vmin=-1,
+            vmax=1,
+        )
+        axes[0].set_title("Ground Truth Ω")
+
+        sns.heatmap(
+            omega_mean,
+            annot=False,
+            cmap="RdBu_r",
+            center=0,
+            xticklabels=gene_names if show_ticks else False,
+            yticklabels=gene_names if show_ticks else False,
+            ax=axes[1],
+            vmin=-1,
+            vmax=1,
+        )
+        axes[1].set_title("Posterior Mean Ω")
+
+        sns.heatmap(
+            omega_std,
+            annot=False,
+            cmap="Reds",
+            xticklabels=gene_names if show_ticks else False,
+            yticklabels=gene_names if show_ticks else False,
+            ax=axes[2],
+        )
+        axes[2].set_title("Posterior Std Ω")
+
+        plt.tight_layout()
+        save_plot("omega_comparison.png")
+
+    # ============================================================
+    # 7-8. Network inference + analysis
+    # ============================================================
+    edges, adjacency = extract_network_edges(
+        omega_mean,
+        omega_std,
+        gene_names,
+        threshold=0.05,
+        use_credible_interval=True,
+        alpha=0.05,
+    )
+
+    print(f"\nExtracted {len(edges)} significant edges from the network.")
+    if edges:
+        edges_sorted = sorted(edges, key=lambda e: abs(e["weight"]), reverse=True)
+        if pd is not None:
+            edges_df = pd.DataFrame(edges_sorted)
+            print(edges_df.head(20).to_string(index=False))
+        else:
+            for e in edges_sorted[:20]:
+                print(f"  {e['gene_i']} -- {e['gene_j']}: {e['weight']:.3f} (std={e['std']:.3f})")
+    else:
+        print("No edges met the significance criteria.")
+        print("Try lowering threshold, increasing samples, or reducing N_GENES.")
+
+    # Ground truth non-zero off-diagonal edges
+    true_edges = []
+    for i in range(N_GENES):
+        for j in range(i + 1, N_GENES):
+            if true_omega[i, j] != 0:
+                true_edges.append((gene_names[i], gene_names[j], true_omega[i, j]))
+
+    print(f"\nGround truth has {len(true_edges)} non-zero interactions.")
+
+    # Export inferred edge list (works without networkx/pandas)
+    if edges:
+        import csv
+
+        edge_list_path = Path("./gene_network_edges.csv")
+        rows = []
+        for e in edges:
+            rows.append({
+                "source": e["gene_i"],
+                "target": e["gene_j"],
+                "weight": float(e["weight"]),
+                "abs_weight": float(abs(e["weight"])),
+                "type": e["type"],
+                "std": float(e["std"]),
+            })
+        with edge_list_path.open("w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+            writer.writeheader()
+            writer.writerows(rows)
+        print(f"\nExported edge list to: {edge_list_path.absolute()}")
+
+    # Optional: network-level analysis + visualization
+    if nx is None:
+        print("\nSkipping NetworkX analysis: install networkx to enable graph stats/plots.")
+        return
+
+    G = build_gene_network(omega_mean, gene_names, threshold=0.05)
+    print("\nNetwork Statistics:")
+    print(f"  Nodes (genes): {G.number_of_nodes()}")
+    print(f"  Edges (interactions): {G.number_of_edges()}")
+    print(f"  Density: {nx.density(G):.3f}")
+    if G.number_of_edges() > 0:
+        print(f"  Connected components: {nx.number_connected_components(G)}")
+
+    degree_cent = {}
+    if G.number_of_edges() > 0:
+        degree_cent = nx.degree_centrality(G)
+        betweenness_cent = nx.betweenness_centrality(G)
+        try:
+            eigen_cent = nx.eigenvector_centrality(G, max_iter=1000)
+        except Exception:
+            eigen_cent = {n: 0 for n in G.nodes()}
+
+        if pd is not None:
+            centrality_df = pd.DataFrame({
+                "Gene": list(degree_cent.keys()),
+                "Degree": [G.degree(n) for n in degree_cent.keys()],
+                "Degree_Centrality": list(degree_cent.values()),
+                "Betweenness": list(betweenness_cent.values()),
+                "Eigenvector": list(eigen_cent.values()),
+            }).sort_values("Degree", ascending=False)
+            print("\nTop genes by degree:")
+            print(centrality_df.head(10).to_string(index=False))
+
+    if plt is None:
+        print("Skipping network plot: install matplotlib to enable visualization.")
+        return
+
+    fig, ax = plt.subplots(figsize=(12, 10))
+    if G.number_of_edges() > 0:
+        pos = nx.spring_layout(G, seed=42, k=2)
+        edge_colors = ["#d62728" if G[u][v]["weight"] < 0 else "#1f77b4" for u, v in G.edges()]
+        edge_weights = [abs(G[u][v]["weight"]) * 5 for u, v in G.edges()]
+        node_sizes = [300 + 500 * degree_cent.get(n, 0.0) for n in G.nodes()]
+
+        nx.draw_networkx_nodes(
+            G,
+            pos,
+            node_size=node_sizes,
+            node_color="lightblue",
+            edgecolors="black",
+            linewidths=1.0,
+            ax=ax,
+        )
+        nx.draw_networkx_edges(G, pos, edge_color=edge_colors, width=edge_weights, alpha=0.7, ax=ax)
+
+        if G.number_of_nodes() <= 30:
+            nx.draw_networkx_labels(G, pos, font_size=10, font_weight="bold", ax=ax)
+            edge_labels = {(u, v): f"{G[u][v]['weight']:.2f}" for u, v in G.edges()}
+            nx.draw_networkx_edge_labels(G, pos, edge_labels, font_size=8, ax=ax)
+
+        ax.set_title("Gene-Gene Interaction Network\n(Blue: positive, Red: negative)", fontsize=14)
+    else:
+        pos = nx.circular_layout(G)
+        nx.draw_networkx_nodes(G, pos, node_size=500, node_color="lightblue", ax=ax)
+        if G.number_of_nodes() <= 30:
+            nx.draw_networkx_labels(G, pos, font_size=10, ax=ax)
+        ax.set_title("Gene Network (No significant interactions detected)", fontsize=14)
+
+    ax.axis("off")
+    plt.tight_layout()
+    save_plot("gene_network.png")
 
 # ============================================================
 # 4. Model Setup
@@ -338,37 +745,9 @@ def setup_model_and_data(X, device):
     print(f"  - Number of interaction parameters: {model.n_interaction_params}")
     print(f"  - Device: {model.device}")
     print(f"  - Data shape: {X_device.shape}")
+    print(f"  - Data device: {X_device.device}")
 
     return model, X_device
-
-
-# Setup with detected device
-model, X_device = setup_model_and_data(X, DEVICE)
-
-print(f"\nPriors:")
-print(f"  - A_tril (interaction params): Normal(0, 1)")
-print(f"  - μ (mean): LogNormal(0, 1)")
-print(f"  - φ (dispersion): LogNormal(0, 1)")
-print(f"  - π (zero-inflation): Beta(1, 1) = Uniform(0, 1)")
-
-# ============================================================
-# 5. MCMC Inference
-# ============================================================
-
-# Inference parameters (reduced for demo speed)
-# For real analysis, increase num_samples to 1000+ and warmup_steps to 500+
-
-NUM_SAMPLES = 100       # Number of posterior samples (increase for production)
-WARMUP_STEPS = 50       # Warmup/burn-in steps (increase for production)
-NUM_CHAINS = 4          # Number of MCMC chains
-TARGET_ACCEPT = 0.8     # Target acceptance probability
-
-print("Inference settings:")
-print(f"  - Posterior samples: {NUM_SAMPLES}")
-print(f"  - Warmup steps: {WARMUP_STEPS}")
-print(f"  - Chains: {NUM_CHAINS}")
-print(f"  - Target acceptance: {TARGET_ACCEPT}")
-print(f"\n⚠️  For publication-quality results, use num_samples=1000+, warmup_steps=500+")
 
 
 def run_inference_with_fallback(model, X_device, **kwargs):
@@ -396,192 +775,9 @@ def run_inference_with_fallback(model, X_device, **kwargs):
             print(f"Running inference on CPU...")
             results = run_inference(cpu_model, X_cpu, **kwargs)
             print(f"✓ Inference completed successfully on CPU!")
-            return results, torch.device("cpu")
+            return results, cpu_model.device
         else:
             raise
-
-
-# Run inference
-print("="*60)
-print("Starting MCMC Inference")
-print("="*60 + "\n")
-
-results, actual_device = run_inference_with_fallback(
-    model,
-    X_device,
-    num_samples=NUM_SAMPLES,
-    warmup_steps=WARMUP_STEPS,
-    num_chains=NUM_CHAINS,
-    target_accept_prob=TARGET_ACCEPT,
-)
-
-print(f"\nInference ran on: {actual_device}")
-
-# CPU Fallback Cell (uncomment if needed)
-# model_cpu, X_cpu = setup_model_and_data(X, "cpu")
-# results = run_inference(
-#     model_cpu,
-#     X_cpu,
-#     num_samples=NUM_SAMPLES,
-#     warmup_steps=WARMUP_STEPS,
-#     num_chains=NUM_CHAINS,
-#     target_accept_prob=TARGET_ACCEPT,
-# )
-# print("✓ CPU inference completed!")
-
-# ============================================================
-# 6. Posterior Analysis
-# ============================================================
-
-# Extract posterior samples
-samples = results["samples"]
-omega_samples = results["omega_samples"]
-summary = results["summary"]
-
-print("Posterior samples available:")
-for key, val in samples.items():
-    print(f"  - {key}: shape {val.shape}")
-print(f"  - omega_samples: shape {omega_samples.shape}")
-
-# Summary statistics
-print("="*60)
-print("POSTERIOR SUMMARY")
-print("="*60)
-
-# Mu (mean) parameters
-mu_mean = summary["mu"]["mean"]
-mu_std = summary["mu"]["std"]
-print(f"\nμ (Mean) parameters:")
-for i, gene in enumerate(gene_names):
-    print(f"  {gene}: {mu_mean[i]:.2f} ± {mu_std[i]:.2f}")
-
-# Phi (dispersion) parameters
-phi_mean = summary["phi"]["mean"]
-phi_std = summary["phi"]["std"]
-print(f"\nφ (Dispersion) parameters:")
-for i, gene in enumerate(gene_names):
-    print(f"  {gene}: {phi_mean[i]:.2f} ± {phi_std[i]:.2f}")
-
-# Pi (zero-inflation) parameters
-pi_mean = summary["pi_zero"]["mean"]
-pi_std = summary["pi_zero"]["std"]
-print(f"\nπ (Zero-inflation) parameters:")
-for i, gene in enumerate(gene_names):
-    print(f"  {gene}: {pi_mean[i]:.3f} ± {pi_std[i]:.3f}")
-
-# Visualize posterior distributions for ZINB parameters
-fig, axes = plt.subplots(3, 1, figsize=(12, 15))
-
-# Mu posteriors
-ax = axes[0]
-mu_samples = samples["mu"].cpu().numpy()
-for i, gene in enumerate(gene_names):
-    ax.hist(mu_samples[:, i], bins=20, alpha=0.5, label=gene)
-ax.set_xlabel("μ (Mean)")
-ax.set_ylabel("Frequency")
-ax.set_title("Posterior Distribution of Mean Parameters (μ)")
-ax.legend(bbox_to_anchor=(1.02, 1), loc='upper left')
-
-# Phi posteriors
-ax = axes[1]
-phi_samples = samples["phi"].cpu().numpy()
-for i, gene in enumerate(gene_names):
-    ax.hist(phi_samples[:, i], bins=20, alpha=0.5, label=gene)
-ax.set_xlabel("φ (Dispersion)")
-ax.set_ylabel("Frequency")
-ax.set_title("Posterior Distribution of Dispersion Parameters (φ)")
-ax.legend(bbox_to_anchor=(1.02, 1), loc='upper left')
-
-# Pi posteriors
-ax = axes[2]
-pi_samples = samples["pi_zero"].cpu().numpy()
-for i, gene in enumerate(gene_names):
-    ax.hist(pi_samples[:, i], bins=20, alpha=0.5, label=gene)
-ax.set_xlabel("π (Zero-inflation probability)")
-ax.set_ylabel("Frequency")
-ax.set_title("Posterior Distribution of Zero-Inflation Parameters (π)")
-ax.legend(bbox_to_anchor=(1.02, 1), loc='upper left')
-
-plt.tight_layout()
-plt.show()
-
-# Visualize Gamma Scaling Factors
-gamma_mu = samples['gamma_mu'].cpu().numpy().flatten()
-gamma_phi = samples['gamma_phi'].cpu().numpy().flatten()
-gamma_pi = samples['gamma_pi'].cpu().numpy().flatten()
-
-fig, ax = plt.subplots(figsize=(10, 6))
-sns.kdeplot(gamma_mu, fill=True, label=f'γ_μ (Mean): {gamma_mu.mean():.2f} ± {gamma_mu.std():.2f}', ax=ax)
-sns.kdeplot(gamma_phi, fill=True, label=f'γ_φ (Dispersion): {gamma_phi.mean():.2f} ± {gamma_phi.std():.2f}', ax=ax)
-sns.kdeplot(gamma_pi, fill=True, label=f'γ_π (Zero-Infl): {gamma_pi.mean():.2f} ± {gamma_pi.std():.2f}', ax=ax)
-
-ax.axvline(1.0, color='gray', linestyle='--', alpha=0.5, label='Expected γ_μ ≈ 1')
-ax.axvline(0.0, color='gray', linestyle=':', alpha=0.5, label='Indep. (γ ≈ 0)')
-
-ax.set_title("Posterior Distribution of Scaling Factors (γ)")
-ax.set_xlabel("Scaling Factor Value")
-ax.legend()
-plt.tight_layout()
-plt.show()
-
-print("Recovered Scaling Factors:")
-print(f"  γ_μ (True={1.0}): {gamma_mu.mean():.3f}")
-print(f"  γ_φ (True={0.5}): {gamma_phi.mean():.3f}")
-print(f"  γ_π (True={-0.5}): {gamma_pi.mean():.3f}")
-
-# Omega posterior mean and comparison to ground truth
-omega_mean = summary["omega"]["mean"]
-omega_std = summary["omega"]["std"]
-
-fig, axes = plt.subplots(1, 3, figsize=(16, 5))
-
-# Ground truth
-ax = axes[0]
-sns.heatmap(
-    true_omega,
-    annot=False,
-    fmt=".2f",
-    cmap="RdBu_r",
-    center=0,
-    xticklabels=gene_names,
-    yticklabels=gene_names,
-    ax=ax,
-    vmin=-1,
-    vmax=1,
-)
-ax.set_title("Ground Truth Ω")
-
-# Posterior mean
-ax = axes[1]
-sns.heatmap(
-    omega_mean,
-    annot=False,
-    fmt=".2f",
-    cmap="RdBu_r",
-    center=0,
-    xticklabels=gene_names,
-    yticklabels=gene_names,
-    ax=ax,
-    vmin=-1,
-    vmax=1,
-)
-ax.set_title("Posterior Mean Ω")
-
-# Posterior std (uncertainty)
-ax = axes[2]
-sns.heatmap(
-    omega_std,
-    annot=False,
-    fmt=".2f",
-    cmap="Reds",
-    xticklabels=gene_names,
-    yticklabels=gene_names,
-    ax=ax,
-)
-ax.set_title("Posterior Std Ω (Uncertainty)")
-
-plt.tight_layout()
-plt.show()
 
 # ============================================================
 # 7. Network Inference from Ω
@@ -621,10 +817,10 @@ def extract_network_edges(
     adjacency : np.ndarray
         Binary adjacency matrix
     """
-    from scipy import stats
+    from statistics import NormalDist
 
     n_genes = len(gene_names)
-    z_crit = stats.norm.ppf(1 - alpha/2)  # Two-tailed
+    z_crit = NormalDist().inv_cdf(1 - alpha / 2)  # Two-tailed
 
     edges = []
     adjacency = np.zeros((n_genes, n_genes))
@@ -659,50 +855,6 @@ def extract_network_edges(
 
     return edges, adjacency
 
-
-# Extract edges with default settings
-edges, adjacency = extract_network_edges(
-    omega_mean,
-    omega_std,
-    gene_names,
-    threshold=0.05,
-    use_credible_interval=True,
-    alpha=0.05,
-)
-
-print(f"Extracted {len(edges)} significant edges from the network:")
-print()
-
-edges_df = pd.DataFrame(edges)
-if len(edges) > 0:
-    edges_df = edges_df.sort_values('weight', key=abs, ascending=False)
-    print(edges_df.to_string(index=False))
-else:
-    print("No edges met the significance criteria.")
-    print("Try lowering the threshold or running more MCMC samples.")
-
-# Compare inferred edges to ground truth
-print("\n" + "="*60)
-print("COMPARISON: Inferred vs Ground Truth Interactions")
-print("="*60)
-
-# Ground truth edges (non-zero off-diagonal)
-true_edges = []
-for i in range(N_GENES):
-    for j in range(i+1, N_GENES):
-        if true_omega[i, j] != 0:
-            true_edges.append({
-                'gene_i': gene_names[i],
-                'gene_j': gene_names[j],
-                'true_weight': true_omega[i, j],
-            })
-
-print(f"\nGround truth has {len(true_edges)} non-zero interactions:")
-for e in true_edges:
-    print(f"  {e['gene_i']} -- {e['gene_j']}: {e['true_weight']:.2f}")
-
-print(f"\nInferred network has {len(edges)} significant edges.")
-
 # ============================================================
 # 8. Network Analysis with NetworkX
 # ============================================================
@@ -726,6 +878,9 @@ def build_gene_network(omega_mean: np.ndarray, gene_names: list, threshold: floa
     G : nx.Graph
         NetworkX graph with weighted edges
     """
+    if nx is None:
+        raise RuntimeError("networkx is required for build_gene_network().")
+
     G = nx.Graph()
 
     # Add all genes as nodes
@@ -747,133 +902,6 @@ def build_gene_network(omega_mean: np.ndarray, gene_names: list, threshold: floa
 
     return G
 
-
-# Build the network
-G = build_gene_network(omega_mean, gene_names, threshold=0.05)
-
-print(f"Network Statistics:")
-print(f"  Nodes (genes): {G.number_of_nodes()}")
-print(f"  Edges (interactions): {G.number_of_edges()}")
-print(f"  Density: {nx.density(G):.3f}")
-
-if G.number_of_edges() > 0:
-    print(f"  Connected components: {nx.number_connected_components(G)}")
-
-# Compute node centrality measures
-if G.number_of_edges() > 0:
-    # Degree centrality
-    degree_cent = nx.degree_centrality(G)
-
-    # Betweenness centrality (for larger networks)
-    betweenness_cent = nx.betweenness_centrality(G)
-
-    # Eigenvector centrality (if connected)
-    try:
-        eigen_cent = nx.eigenvector_centrality(G, max_iter=1000)
-    except Exception:
-        eigen_cent = {n: 0 for n in G.nodes()}
-
-    # Create centrality DataFrame
-    centrality_df = pd.DataFrame({
-        'Gene': list(degree_cent.keys()),
-        'Degree': [G.degree(n) for n in degree_cent.keys()],
-        'Degree_Centrality': list(degree_cent.values()),
-        'Betweenness': list(betweenness_cent.values()),
-        'Eigenvector': list(eigen_cent.values()),
-    }).sort_values('Degree', ascending=False)
-
-    print("Gene Centrality Measures:")
-    print(centrality_df.to_string(index=False))
-
-    # Identify hub genes (top centrality)
-    hub_genes = centrality_df.nlargest(3, 'Degree')['Gene'].tolist()
-    print(f"\nPotential hub genes: {', '.join(hub_genes)}")
-else:
-    print("No edges in network - cannot compute centralities")
-
-# Visualize the network
-fig, ax = plt.subplots(figsize=(12, 10))
-
-if G.number_of_edges() > 0:
-    # Layout
-    pos = nx.spring_layout(G, seed=42, k=2)
-
-    # Edge colors: red for negative, blue for positive
-    edge_colors = ['#d62728' if G[u][v]['weight'] < 0 else '#1f77b4' for u, v in G.edges()]
-
-    # Edge widths proportional to absolute weight
-    edge_weights = [abs(G[u][v]['weight']) * 5 for u, v in G.edges()]
-
-    # Node sizes proportional to degree
-    node_sizes = [300 + 500 * degree_cent[n] for n in G.nodes()]
-
-    # Draw network
-    nx.draw_networkx_nodes(
-        G, pos,
-        node_size=node_sizes,
-        node_color='lightblue',
-        edgecolors='black',
-        linewidths=1.5,
-        ax=ax
-    )
-
-    nx.draw_networkx_edges(
-        G, pos,
-        edge_color=edge_colors,
-        width=edge_weights,
-        alpha=0.7,
-        ax=ax
-    )
-
-    nx.draw_networkx_labels(
-        G, pos,
-        font_size=10,
-        font_weight='bold',
-        ax=ax
-    )
-
-    # Add edge labels with weights
-    edge_labels = {(u, v): f"{G[u][v]['weight']:.2f}" for u, v in G.edges()}
-    nx.draw_networkx_edge_labels(G, pos, edge_labels, font_size=8, ax=ax)
-
-    ax.set_title("Gene-Gene Interaction Network\n(Blue: positive, Red: negative)", fontsize=14)
-else:
-    # Draw just nodes if no edges
-    pos = nx.circular_layout(G)
-    nx.draw_networkx_nodes(G, pos, node_size=500, node_color='lightblue', ax=ax)
-    nx.draw_networkx_labels(G, pos, font_size=10, ax=ax)
-    ax.set_title("Gene Network (No significant interactions detected)", fontsize=14)
-
-ax.axis('off')
-plt.tight_layout()
-plt.show()
-
-# Export network for external analysis (e.g., R/igraph, Cytoscape)
-if G.number_of_edges() > 0:
-    # Export edge list
-    edge_list_path = Path("./gene_network_edges.csv")
-
-    edge_data = []
-    for u, v, data in G.edges(data=True):
-        edge_data.append({
-            'source': u,
-            'target': v,
-            'weight': data['weight'],
-            'abs_weight': data['abs_weight'],
-            'type': data['edge_type']
-        })
-
-    edge_df = pd.DataFrame(edge_data)
-    edge_df.to_csv(edge_list_path, index=False)
-
-    print(f"Exported edge list to: {edge_list_path.absolute()}")
-    print(f"\nThis file can be imported into:")
-    print(f"  - R with: edges <- read.csv('{edge_list_path}')")
-    print(f"  - igraph: g <- graph_from_data_frame(edges)")
-    print(f"  - Cytoscape: File → Import → Network from File")
-else:
-    print("No edges to export.")
-
 # ============================================================
 # Summary
 # ============================================================
@@ -893,13 +921,20 @@ else:
 # - Export to R for advanced igraph analysis
 # - Integrate with the R PreGraphModeling package for RBM modeling
 
-# Clean up generated files (optional)
-# Uncomment to remove temporary files
-# import os
-# if DATA_PATH.exists():
-#     os.remove(DATA_PATH)
-#     print(f"Removed {DATA_PATH}")
-#
-# if edge_list_path.exists():
-#     os.remove(edge_list_path)
-#     print(f"Removed {edge_list_path}")
+    # Clean up generated files (optional)
+    # Uncomment to remove temporary files
+    # import os
+    # if DATA_PATH.exists():
+    #     os.remove(DATA_PATH)
+    #     print(f"Removed {DATA_PATH}")
+    #
+    # if edge_list_path.exists():
+    #     os.remove(edge_list_path)
+    #     print(f"Removed {edge_list_path}")
+
+
+if __name__ == "__main__":
+    from multiprocessing import freeze_support
+
+    freeze_support()
+    main()
