@@ -1,4 +1,23 @@
-torch>=2.6.0
+## PyTorch install notes (GPU/CPU wheel selection)
+##
+## PyTorch publishes different wheel “channels” via index URLs.
+## For NVIDIA A100 (Ampere), CUDA 11.8 or 12.1 wheels are common choices
+## (pick based on your host driver / cluster image). Examples:
+##
+##   # A100 / RTX 30-series, CUDA 12.1
+##   # uv pip install --index-url https://download.pytorch.org/whl/cu121 torch torchvision torchaudio
+##
+##   # A100, CUDA 11.8 (often works on older driver stacks)
+##   # uv pip install --index-url https://download.pytorch.org/whl/cu118 torch torchvision torchaudio
+##
+##   # CPU-only (no GPU)
+##   # uv pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision torchaudio
+##
+## If you use multiple indexes with uv, you may need:
+##   --index-strategy unsafe-best-match
+## (because torch also exists on PyPI, but CUDA wheels are on the PyTorch index).
+
+torch>=2.5.1
 pyro-ppl>=1.8.0
 numpy>=1.20.0
 # cache bust 0.1.1

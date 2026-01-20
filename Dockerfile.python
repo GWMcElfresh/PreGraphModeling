@@ -1,5 +1,18 @@
-# Python ZINB Graphical Model Dockerfile with PyTorch GPU Support
+# Python ZINB Graphical Model Dockerfile (UV-based)
 # Multi-stage build: base -> deps -> runtime
+#
+# CPU-in-CI, CUDA-at-container-start:
+# - GitHub Actions runners frequently run out of disk if you bake CUDA torch wheels
+#   into the image.
+# - This Dockerfile therefore installs CPU-only torch by default (small), and the
+#   final image includes an entrypoint that detects NVIDIA GPUs and upgrades torch
+#   to CUDA wheels when the container is started on a GPU machine.
+# - To disable the auto-upgrade, set PREGRAPHMODELING_TORCH_AUTO=0.
+#
+# Notes on GPU:
+# - CUDA-enabled PyTorch wheels bundle CUDA runtime libraries, but still require a
+#   compatible NVIDIA driver on the host and Docker run with GPU access.
+# - Typical run: `docker run --gpus all ...`
 
 ARG DEPS_IMAGE=deps
 ARG BASE_IMAGE=python:3.11-slim
@@ -26,6 +39,13 @@ RUN if [ "$SKIP_BASE_DEPS" = "false" ]; then \
         echo "Skipping base dependency installation (using pre-built base image)"; \
     fi
 
+# Install UV into the image (system-wide)
+# - Uses Astral's official installer.
+# - Pinning UV_VERSION is optional; leave blank to get the latest.
+ARG UV_VERSION=
+ENV UV_INSTALL_DIR=/usr/local/bin
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+
 # ============================================================================
 # Stage 2: Deps - Python packages with PyTorch
 # ============================================================================
@@ -35,19 +55,32 @@ ARG DEBIAN_FRONTEND=noninteractive
 
 WORKDIR /app
 
-# Set mode to CPU to allow lightweight image
-ENV PREGRAPHMODELING_DOCKER_MODE=cpu
+# Configure which PyTorch wheel index to use during the image build.
+# Default is CPU-only to keep CI images small.
+# Common values:
+#   - CPU:       https://download.pytorch.org/whl/cpu
+#   - CUDA 11.8: https://download.pytorch.org/whl/cu118
+#   - CUDA 12.1: https://download.pytorch.org/whl/cu121   (common for A100/RTX 30)
+#   - CUDA 12.4: https://download.pytorch.org/whl/cu124
+ARG UV_INDEX_URL=https://download.pytorch.org/whl/cpu
+ARG UV_EXTRA_INDEX_URL=https://pypi.org/simple
+ARG UV_INDEX_STRATEGY=unsafe-best-match
 
-# Install PyTorch with CUDA support and other dependencies
-# Using pip with --extra-index-url for PyTorch CUDA wheels
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir --break-system-packages --index-url https://download.pytorch.org/whl/cpu \
-        torch>=2.6.0 && \
-    pip install --no-cache-dir --break-system-packages \
-        pyro-ppl>=1.8.0 \
-        numpy>=1.20.0 \
-        pytest>=7.0.0 && \
-    rm -rf ~/.cache/pip
+# Copy only dependency files first for better Docker layer caching
+COPY python/pyproject.toml /app/pyproject.toml
+COPY python/requirements.txt /app/requirements.txt
+
+# Install runtime + dev deps into the system interpreter using uv
+RUN uv pip install --system \
+      --index-url ${UV_INDEX_URL} \
+      --extra-index-url ${UV_EXTRA_INDEX_URL} \
+      --index-strategy ${UV_INDEX_STRATEGY} \
+      -r /app/requirements.txt && \
+    uv pip install --system \
+      --index-url ${UV_INDEX_URL} \
+      --extra-index-url ${UV_EXTRA_INDEX_URL} \
+      --index-strategy ${UV_INDEX_STRATEGY} \
+      pytest>=7.0.0 pytest-cov>=4.0.0
 
 # ============================================================================
 # Stage 3: Runtime - Application code
@@ -58,18 +91,28 @@ ARG DEBIAN_FRONTEND=noninteractive
 
 WORKDIR /app
 
+# Entry point that upgrades torch to CUDA wheels on GPU machines.
+# Defaults to cu121 at runtime; override per host driver/GPU as needed.
+# (A100 often works with cu121 or cu118.)
+ENV PREGRAPHMODELING_TORCH_AUTO=1
+ENV PREGRAPHMODELING_TORCH_GPU_INDEX_URL=https://download.pytorch.org/whl/cu121
+ENV PREGRAPHMODELING_UV_INDEX_STRATEGY=unsafe-best-match
+ENV PREGRAPHMODELING_TORCH_GPU_PACKAGES="torch torchvision torchaudio"
+
 # Copy Python module
 COPY python/ /app/
 
-# Allow pip to install into system python
-ENV PIP_BREAK_SYSTEM_PACKAGES=1
+# Copy entrypoint script
+COPY docker/uv_torch_autoinstall.sh /usr/local/bin/uv_torch_autoinstall
+RUN chmod +x /usr/local/bin/uv_torch_autoinstall
 
-# Install the package in development mode
-RUN pip install -e . --break-system-packages && \
-    rm -rf ~/.cache/pip
+# Install the package (editable), without re-resolving dependencies
+RUN uv pip install --system -e . --no-deps
 
 # Set environment variables for GPU
 ENV CUDA_VISIBLE_DEVICES=0
 ENV PYTHONUNBUFFERED=1
+
+ENTRYPOINT ["/usr/local/bin/uv_torch_autoinstall"]
 
 CMD ["python", "-m", "pytest", "tests/", "-v"]

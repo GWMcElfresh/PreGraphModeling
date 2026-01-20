@@ -24,7 +24,13 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Bio-Informatics",
 ]
 dependencies = [
-    "torch>=2.6.0",
+    # NOTE on PyTorch + GPU wheels:
+    # - CUDA-enabled wheels live on the PyTorch index, not PyPI.
+    # - The selected wheel is controlled by the index URL (e.g. cu121/cu118/cpu) and
+    #   the resolved version often includes a local version tag like "+cu121".
+    # - For NVIDIA A100 (Ampere), CUDA 11.8 or 12.1 wheels are common choices, depending
+    #   on your host driver. Start with cu121 if your driver supports CUDA 12.
+    "torch>=2.5.1",
     "pyro-ppl>=1.8.0",
     "numpy>=1.20.0",
 ]
@@ -42,3 +48,18 @@ Repository = "https://github.com/GWMcElfresh/PreGraphModeling"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["zinb_graphical_model*"]
+
+[tool.uv]
+# UV resolution notes:
+# - We prefer the PyTorch wheel index first so GPU builds (e.g. +cu121) are discoverable.
+# - UV defaults to a conservative index strategy to avoid dependency confusion; since we
+#   trust both PyPI and the official PyTorch index, we set unsafe-best-match.
+#
+# Common PyTorch wheel indices:
+# - CPU only:   https://download.pytorch.org/whl/cpu
+# - CUDA 11.8:  https://download.pytorch.org/whl/cu118  (common for older drivers)
+# - CUDA 12.1:  https://download.pytorch.org/whl/cu121  (common for RTX 30/A100)
+# - CUDA 12.4:  https://download.pytorch.org/whl/cu124  (if you need newer CUDA)
+index-url = "https://download.pytorch.org/whl/cu121"
+extra-index-url = ["https://pypi.org/simple"]
+index-strategy = "unsafe-best-match"
