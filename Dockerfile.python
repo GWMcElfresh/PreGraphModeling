@@ -106,6 +106,12 @@ COPY python/ /app/
 COPY docker/uv_torch_autoinstall.sh /usr/local/bin/uv_torch_autoinstall
 RUN chmod +x /usr/local/bin/uv_torch_autoinstall
 
+# Ensure torch auto-install also runs when ENTRYPOINT is bypassed (e.g., exec vs run).
+# Bash sources $BASH_ENV for non-interactive shells, which includes bash scripts.
+COPY docker/uv_torch_autoinstall_env.sh /etc/profile.d/uv_torch_autoinstall_env.sh
+RUN chmod +x /etc/profile.d/uv_torch_autoinstall_env.sh
+ENV BASH_ENV=/etc/profile.d/uv_torch_autoinstall_env.sh
+
 # Install the package (editable), without re-resolving dependencies
 RUN uv pip install --system -e . --no-deps
 
