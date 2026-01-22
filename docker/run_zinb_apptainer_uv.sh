@@ -193,7 +193,7 @@ main() {
   cd "$proj_dir"
 
   log "[run_zinb] Running: python fit_zinb_graphical_model.py $*"
-  uv run --active python fit_zinb_graphical_model.py "$@"
+  "$VENV_DIR/bin/python" fit_zinb_graphical_model.py "$@"
 }
 
 main "$@"
