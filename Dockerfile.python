@@ -103,6 +103,11 @@ ENV PREGRAPHMODELING_TORCH_GPU_PACKAGES="torch torchvision torchaudio"
 # Copy Python module
 COPY python/ /app/
 
+# Copy runner script into a stable in-image path.
+# This allows HPC jobs to call it as: /docker/run_zinb_apptainer_uv.sh
+COPY docker/run_zinb_apptainer_uv.sh /docker/run_zinb_apptainer_uv.sh
+RUN chmod +x /docker/run_zinb_apptainer_uv.sh
+
 # Copy entrypoint script
 COPY docker/uv_torch_autoinstall.sh /usr/local/bin/uv_torch_autoinstall
 RUN chmod +x /usr/local/bin/uv_torch_autoinstall
