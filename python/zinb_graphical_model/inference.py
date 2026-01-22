@@ -8,6 +8,8 @@ Implements NUTS/HMC sampling for joint inference of all parameters:
     π (pi_zero): Zero-inflation probabilities per feature
 """
 
+from __future__ import annotations
+
 from typing import Any
 
 import torch
@@ -193,13 +195,15 @@ def run_svi_inference(
     if total_size == 0:
         raise ValueError("X has zero rows")
     x_shape_probe = X[:1].to(model.device)
+    # Use a dummy batch_indices tensor to match the guide/model signature used during training.
+    dummy_batch_indices = torch.arange(x_shape_probe.shape[0], device="cpu")
 
     sample_sites = ("A_tril", "mu", "phi", "pi_zero", "gamma_mu", "gamma_phi", "gamma_pi")
     samples: dict[str, torch.Tensor] = {name: [] for name in sample_sites}
 
     with torch.no_grad():
         for _ in range(num_posterior_samples):
-            draw = guide(x_shape_probe)
+            draw = guide(x_shape_probe, batch_indices=dummy_batch_indices, total_size=total_size)
             for name in sample_sites:
                 samples[name].append(draw[name].detach().cpu())
 

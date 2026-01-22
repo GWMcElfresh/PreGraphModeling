@@ -22,6 +22,8 @@ Greek Parameters:
             of excess zeros beyond what the negative binomial predicts. Range [0, 1].
 """
 
+from __future__ import annotations
+
 import torch
 import pyro
 import pyro.distributions as dist
@@ -316,18 +318,13 @@ class ZINBPseudoLikelihoodGraphicalModel(PyroModule):
                 ),
             )
 
-        if batch_indices is None:
-            with pyro.plate("data", n_samples):
-                pseudo_ll = self._pseudo_log_likelihood(
-                    X, Omega, mu, phi, pi_zero, gamma_mu, gamma_phi, gamma_pi
-                )
-                pyro.factor("pseudo_likelihood", pseudo_ll)
-        else:
-            with pyro.plate("data", size=total_size, subsample=batch_indices):
-                pseudo_ll = self._pseudo_log_likelihood(
-                    X, Omega, mu, phi, pi_zero, gamma_mu, gamma_phi, gamma_pi
-                )
-                pyro.factor("pseudo_likelihood", pseudo_ll)
+        plate_kwargs = {"size": n_samples} if batch_indices is None else {"size": total_size, "subsample": batch_indices}
+
+        with pyro.plate("data", **plate_kwargs):
+            pseudo_ll = self._pseudo_log_likelihood(
+                X, Omega, mu, phi, pi_zero, gamma_mu, gamma_phi, gamma_pi
+            )
+            pyro.factor("pseudo_likelihood", pseudo_ll)
 
     def get_omega(
         self, A_tril: torch.Tensor

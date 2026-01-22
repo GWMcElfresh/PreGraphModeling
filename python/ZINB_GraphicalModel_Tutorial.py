@@ -391,6 +391,25 @@ def main():
     print(f"Tensor dtype: {X.dtype}")
     print(f"Device: {X.device}")
 
+    # Initialize gene_names and counts for visualization (if not already set by synthetic data generation)
+    if not USE_SYNTHETIC_DATA:
+        # Try to read gene names from CSV/TSV header
+        suffix = DATA_PATH.suffix.lower()
+        if suffix in {".csv", ".tsv", ".txt"}:
+            delim = "," if suffix == ".csv" else "\t"
+            with DATA_PATH.open("r", encoding="utf-8") as f:
+                header = f.readline().strip()
+            if header:
+                gene_names = [h.strip() for h in header.split(delim) if h.strip()]
+            else:
+                gene_names = [f"Gene{i+1}" for i in range(X.shape[1])]
+        else:
+            # For NPY/NPZ files, generate generic gene names
+            gene_names = [f"Gene{i+1}" for i in range(X.shape[1])]
+        
+        # Convert tensor to numpy for visualization compatibility
+        counts = X.cpu().numpy()
+
     # Visualize count distributions (subset for readability)
     n_genes = len(gene_names)
     n_plot = min(PLOT_MAX_GENES, n_genes)

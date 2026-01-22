@@ -236,6 +236,49 @@ class TestInference:
 
         assert results["omega_samples"].shape == (10, n_features, n_features)
 
+    @pytest.mark.slow
+    def test_run_svi_inference_small(self):
+        """Test running SVI inference on a small dataset with minibatching."""
+        from zinb_graphical_model.model import ZINBPseudoLikelihoodGraphicalModel
+        from zinb_graphical_model.inference import run_svi_inference
+
+        torch.manual_seed(42)
+        n_samples, n_features = 20, 3
+        X = torch.randint(0, 5, (n_samples, n_features)).float()
+
+        model = ZINBPseudoLikelihoodGraphicalModel(n_features=n_features, device="cpu")
+
+        results = run_svi_inference(
+            model,
+            X,
+            batch_size=8,
+            num_epochs=10,
+            learning_rate=1e-2,
+            num_posterior_samples=10,
+            progress_every=0,
+            seed=42,
+        )
+
+        assert "samples" in results
+        assert "omega_samples" in results
+        assert "summary" in results
+        assert "losses" in results
+        assert "guide" in results
+
+        assert "mu" in results["samples"]
+        assert "phi" in results["samples"]
+        assert "pi_zero" in results["samples"]
+        assert "A_tril" in results["samples"]
+        assert "gamma_mu" in results["samples"]
+        assert "gamma_phi" in results["samples"]
+        assert "gamma_pi" in results["samples"]
+
+        assert results["omega_samples"].shape == (10, n_features, n_features)
+        assert len(results["losses"]) == 10
+
+        # Verify that loss decreases or stabilizes (basic convergence check)
+        assert results["losses"][-1] <= results["losses"][0] * 1.5
+
     def test_compute_summary(self):
         """Test computing summary statistics."""
         from zinb_graphical_model.inference import compute_summary

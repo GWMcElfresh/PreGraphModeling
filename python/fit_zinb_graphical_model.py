@@ -1,6 +1,9 @@
 """Runner to fit a ZINB graphical model from a count matrix.
 
 Supports two inference modes:
+- ``mcmc``: full Bayesian inference via MCMC (e.g., NUTS/HMC) over all parameters.
+- ``svi``: stochastic variational inference, suitable for large datasets and minibatching.
+
 Outputs:
 - omega_mean.csv / omega_std.csv: posterior mean/std of Ω
 - posterior_samples.npz: posterior samples for all parameters (MCMC or SVI)
