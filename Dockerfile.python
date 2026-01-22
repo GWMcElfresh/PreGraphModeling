@@ -29,6 +29,7 @@ ARG SKIP_BASE_DEPS=false
 RUN if [ "$SKIP_BASE_DEPS" = "false" ]; then \
     apt-get update && apt-get install -y \
         build-essential \
+        bash \
         git \
         curl \
         wget \
