@@ -54,6 +54,31 @@ except Exception:  # pragma: no cover
     nx = None
 from pathlib import Path
 
+# ============================================================
+# Inputs (edit these)
+# ============================================================
+# You can either:
+#   (A) point COUNT_MATRIX_PATH at a real CSV/TSV/NPY/NPZ count matrix, OR
+#   (B) set USE_SYNTHETIC_DATA=True to generate synthetic_counts.csv
+#
+# CSV/TSV expectations:
+#   - first row is a header with feature (gene) names
+#   - rows are cells/samples, columns are genes/features
+
+COUNT_MATRIX_PATH = os.getenv("COUNT_MATRIX_PATH", "./synthetic_counts.csv")
+USE_SYNTHETIC_DATA = os.getenv("USE_SYNTHETIC_DATA", "1").lower() in {"1", "true", "yes"}
+
+# Inference mode:
+#   - "mcmc" uses NUTS/HMC and requires the full matrix on the compute device
+#   - "svi" uses minibatching and only moves batches to the device (recommended for big data)
+INFERENCE_METHOD = os.getenv("INFERENCE_METHOD", "svi").lower()  # "mcmc" or "svi"
+
+# SVI/minibatching settings
+SVI_BATCH_SIZE = int(os.getenv("SVI_BATCH_SIZE", "256"))
+SVI_EPOCHS = int(os.getenv("SVI_EPOCHS", "200"))
+SVI_LR = float(os.getenv("SVI_LR", "0.01"))
+SVI_POSTERIOR_SAMPLES = int(os.getenv("SVI_POSTERIOR_SAMPLES", "200"))
+
 # -------------------------------
 # Output/verbosity configuration
 # -------------------------------
@@ -77,6 +102,7 @@ def save_plot(filename: str):
 from zinb_graphical_model import (
     ZINBPseudoLikelihoodGraphicalModel,
     run_inference,
+    run_svi_inference,
     load_count_matrix,
 )
 
@@ -296,68 +322,70 @@ def main():
     TRUE_GAMMA_PHI = 0.5   # Interactions moderately affect dispersion
     TRUE_GAMMA_PI = -0.5   # Interactions negatively affect dropout (higher interaction -> lower dropout)
 
-    counts, gene_names, true_omega = generate_synthetic_counts(
-        n_cells=N_CELLS,
-        n_genes=N_GENES,
-        base_mean=5.0,
-        base_dispersion=2.0,
-        base_zero_inflation=0.2,
-        gamma_mu=TRUE_GAMMA_MU,
-        gamma_phi=TRUE_GAMMA_PHI,
-        gamma_pi=TRUE_GAMMA_PI,
-    )
+    if USE_SYNTHETIC_DATA:
+        counts, gene_names, true_omega = generate_synthetic_counts(
+            n_cells=N_CELLS,
+            n_genes=N_GENES,
+            base_mean=5.0,
+            base_dispersion=2.0,
+            base_zero_inflation=0.2,
+            gamma_mu=TRUE_GAMMA_MU,
+            gamma_phi=TRUE_GAMMA_PHI,
+            gamma_pi=TRUE_GAMMA_PI,
+        )
 
-    print(f"Generated count matrix: {counts.shape[0]} cells × {counts.shape[1]} genes")
-    print(f"Gene names: {gene_names}")
-    print(f"\nCount statistics:")
-    print(f"  Total counts: {counts.sum():,}")
-    print(f"  Sparsity (% zeros): {100 * (counts == 0).mean():.1f}%")
-    print(f"  Mean count: {counts.mean():.2f}")
-    print(f"  Max count: {counts.max()}")
+        print(f"Generated count matrix: {counts.shape[0]} cells × {counts.shape[1]} genes")
+        print(f"Gene names: {gene_names}")
+        print(f"\nCount statistics:")
+        print(f"  Total counts: {counts.sum():,}")
+        print(f"  Sparsity (% zeros): {100 * (counts == 0).mean():.1f}%")
+        print(f"  Mean count: {counts.mean():.2f}")
+        print(f"  Max count: {counts.max()}")
 
     # Visualize the true interaction matrix
-    if plt is not None and sns is not None:
-        fig, ax = plt.subplots(figsize=(8, 6))
-        sns.heatmap(
-            true_omega,
-            annot=False,
-            fmt=".2f",
-            cmap="RdBu_r",
-            center=0,
-            xticklabels=gene_names if len(gene_names) <= 30 else False,
-            yticklabels=gene_names if len(gene_names) <= 30 else False,
-            ax=ax,
-            vmin=-1,
-            vmax=1,
-        )
-        ax.set_title("Ground Truth Interaction Matrix (Ω)")
-        plt.tight_layout()
-        save_plot("true_interaction_matrix.png")
-    else:
-        print("Skipping plots: install matplotlib+seaborn to enable visualization.")
+    if USE_SYNTHETIC_DATA:
+        if plt is not None and sns is not None:
+            fig, ax = plt.subplots(figsize=(8, 6))
+            sns.heatmap(
+                true_omega,
+                annot=False,
+                fmt=".2f",
+                cmap="RdBu_r",
+                center=0,
+                xticklabels=gene_names if len(gene_names) <= 30 else False,
+                yticklabels=gene_names if len(gene_names) <= 30 else False,
+                ax=ax,
+                vmin=-1,
+                vmax=1,
+            )
+            ax.set_title("Ground Truth Interaction Matrix (Ω)")
+            plt.tight_layout()
+            save_plot("true_interaction_matrix.png")
+        else:
+            print("Skipping plots: install matplotlib+seaborn to enable visualization.")
 
     # Save and Load Data as CSV
     # The package supports CSV, TSV, NPY, and NPZ formats.
 
     # Save to CSV (you can replace this file with real scRNA-seq data later)
-    DATA_PATH = Path("./synthetic_counts.csv")
+    DATA_PATH = Path(COUNT_MATRIX_PATH)
 
-    # Write CSV with header row (works without pandas)
-    header = ",".join(gene_names)
-    np.savetxt(DATA_PATH, counts, delimiter=",", header=header, comments="", fmt="%d")
+    if USE_SYNTHETIC_DATA:
+        # Write CSV with header row (works without pandas)
+        header = ",".join(gene_names)
+        np.savetxt(DATA_PATH, counts, delimiter=",", header=header, comments="", fmt="%d")
 
-    print(f"Saved count matrix to: {DATA_PATH.absolute()}")
-    print(f"\nFile preview:")
-    if pd is not None:
-        df = pd.read_csv(DATA_PATH)
-        print(df.head())
-    else:
-        print(counts[:5, :min(5, counts.shape[1])])
+        print(f"Saved count matrix to: {DATA_PATH.absolute()}")
+        print(f"\nFile preview:")
+        if pd is not None:
+            df = pd.read_csv(DATA_PATH)
+            print(df.head())
+        else:
+            print(counts[:5, :min(5, counts.shape[1])])
 
-    # Load the count matrix using our package's loader
-    # This will be the main entry point when using real data
-
-    X = load_count_matrix(str(DATA_PATH), device="cpu")  # Load to CPU first
+    # Load the count matrix using our package's loader.
+    # Always load to CPU first; for SVI we keep it on CPU and only move minibatches.
+    X = load_count_matrix(str(DATA_PATH), device="cpu")
 
     print(f"Loaded tensor shape: {X.shape}")
     print(f"Tensor dtype: {X.dtype}")
@@ -394,7 +422,12 @@ def main():
     # ============================================================
     # 4. Model Setup
     # ============================================================
-    model, X_device = setup_model_and_data(X, DEVICE)
+    model = ZINBPseudoLikelihoodGraphicalModel(n_features=int(X.shape[1]), device=DEVICE)
+    print(f"Model initialized:")
+    print(f"  - Number of features (genes): {model.n_features}")
+    print(f"  - Number of interaction parameters: {model.n_interaction_params}")
+    print(f"  - Device: {model.device}")
+    print(f"  - Data shape: {tuple(X.shape)}")
 
     print(f"\nPriors (from model implementation):")
     print(f"  - A_tril (interaction params): Normal(0, 0.1)")
@@ -406,41 +439,66 @@ def main():
     print(f"  - π (zero-inflation): Beta(1, 1)")
 
     # ============================================================
-    # 5. MCMC Inference
+    # 5. Inference
     # ============================================================
-    # Keep defaults small for a runnable tutorial. Override with env vars for real runs.
-    NUM_SAMPLES = int(os.getenv("NUM_SAMPLES", "100"))
-    WARMUP_STEPS = int(os.getenv("WARMUP_STEPS", "50"))
-    NUM_CHAINS = int(os.getenv("NUM_CHAINS", "1"))
-    TARGET_ACCEPT = float(os.getenv("TARGET_ACCEPT", "0.8"))
-    MAX_TREE_DEPTH = int(os.getenv("MAX_TREE_DEPTH", "10"))
-    JIT_COMPILE = os.getenv("JIT_COMPILE", "0").lower() in {"1", "true", "yes"}
+    if INFERENCE_METHOD not in {"mcmc", "svi"}:
+        raise ValueError("INFERENCE_METHOD must be 'mcmc' or 'svi'")
 
-    print("\nInference settings:")
-    print(f"  - Posterior samples: {NUM_SAMPLES}")
-    print(f"  - Warmup steps: {WARMUP_STEPS}")
-    print(f"  - Chains: {NUM_CHAINS}")
-    print(f"  - Target acceptance: {TARGET_ACCEPT}")
-    print(f"  - Max tree depth: {MAX_TREE_DEPTH}")
-    print(f"  - JIT compile: {JIT_COMPILE}")
-    if N_GENES >= 50:
-        print("\n⚠️  N_GENES is large; MCMC may take a long time.")
-        print("   Consider setting env vars like N_GENES=20, NUM_SAMPLES=100, WARMUP_STEPS=50.")
+    if INFERENCE_METHOD == "mcmc":
+        # Keep defaults small for a runnable tutorial. Override with env vars for real runs.
+        NUM_SAMPLES = int(os.getenv("NUM_SAMPLES", "100"))
+        WARMUP_STEPS = int(os.getenv("WARMUP_STEPS", "50"))
+        NUM_CHAINS = int(os.getenv("NUM_CHAINS", "1"))
+        TARGET_ACCEPT = float(os.getenv("TARGET_ACCEPT", "0.8"))
+        MAX_TREE_DEPTH = int(os.getenv("MAX_TREE_DEPTH", "10"))
+        JIT_COMPILE = os.getenv("JIT_COMPILE", "0").lower() in {"1", "true", "yes"}
 
-    print("=" * 60)
-    print("Starting MCMC Inference")
-    print("=" * 60 + "\n")
-    results, actual_device = run_inference_with_fallback(
-        model,
-        X_device,
-        num_samples=NUM_SAMPLES,
-        warmup_steps=WARMUP_STEPS,
-        num_chains=NUM_CHAINS,
-        target_accept_prob=TARGET_ACCEPT,
-        max_tree_depth=MAX_TREE_DEPTH,
-        jit_compile=JIT_COMPILE,
-    )
-    print(f"\nInference ran on: {actual_device}")
+        print("\nInference mode: MCMC (NUTS/HMC)")
+        print("Inference settings:")
+        print(f"  - Posterior samples: {NUM_SAMPLES}")
+        print(f"  - Warmup steps: {WARMUP_STEPS}")
+        print(f"  - Chains: {NUM_CHAINS}")
+        print(f"  - Target acceptance: {TARGET_ACCEPT}")
+        print(f"  - Max tree depth: {MAX_TREE_DEPTH}")
+        print(f"  - JIT compile: {JIT_COMPILE}")
+        if N_GENES >= 50:
+            print("\n  N_GENES is large; MCMC may take a long time.")
+
+        X_device = X.to(model.device)
+        print("=" * 60)
+        print("Starting MCMC Inference")
+        print("=" * 60 + "\n")
+        results, actual_device = run_inference_with_fallback(
+            model,
+            X_device,
+            num_samples=NUM_SAMPLES,
+            warmup_steps=WARMUP_STEPS,
+            num_chains=NUM_CHAINS,
+            target_accept_prob=TARGET_ACCEPT,
+            max_tree_depth=MAX_TREE_DEPTH,
+            jit_compile=JIT_COMPILE,
+        )
+        print(f"\nInference ran on: {actual_device}")
+    else:
+        print("\nInference mode: SVI (minibatching)")
+        print("SVI settings:")
+        print(f"  - Batch size: {SVI_BATCH_SIZE}")
+        print(f"  - Epochs: {SVI_EPOCHS}")
+        print(f"  - Learning rate: {SVI_LR}")
+        print(f"  - Posterior samples (approx): {SVI_POSTERIOR_SAMPLES}")
+        print("=" * 60)
+        print("Starting SVI (minibatched) Inference")
+        print("=" * 60 + "\n")
+
+        # Keep the full X on CPU. Only minibatches are moved to model.device.
+        results = run_svi_inference(
+            model,
+            X,
+            batch_size=SVI_BATCH_SIZE,
+            num_epochs=SVI_EPOCHS,
+            learning_rate=SVI_LR,
+            num_posterior_samples=SVI_POSTERIOR_SAMPLES,
+        )
 
     # ============================================================
     # 6. Posterior Analysis

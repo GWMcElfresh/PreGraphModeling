@@ -200,7 +200,7 @@ class TestZINBPseudoLikelihoodGraphicalModel:
             X, Omega, mu, phi, pi_zero, gamma_mu, gamma_phi, gamma_pi
         )
 
-        assert torch.isfinite(pll)
+        assert torch.isfinite(pll).all()
 
 
 class TestInference:

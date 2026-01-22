@@ -193,11 +193,11 @@ class ZINBPseudoLikelihoodGraphicalModel(PyroModule):
             gamma_pi (γ_π): Scalar scaling factor for π interactions.
 
         Returns:
-            Total pseudo-log-likelihood (scalar) summed over all features and samples.
+            Pseudo-log-likelihood per sample (shape: (n_samples,)).
         """
         n_samples, n_features = X.shape
 
-        total_log_prob = torch.tensor(0.0, device=self.device)
+        total_log_prob = torch.zeros(n_samples, device=self.device)
 
         for j in range(n_features):
             mask = torch.ones(n_features, dtype=torch.bool, device=self.device)
@@ -228,11 +228,16 @@ class ZINBPseudoLikelihoodGraphicalModel(PyroModule):
             conditional_pi = torch.sigmoid(conditional_logit_pi)
 
             log_prob_j = self._zinb_log_prob(X[:, j], conditional_mu, conditional_phi, conditional_pi)
-            total_log_prob = total_log_prob + log_prob_j.sum()
+            total_log_prob = total_log_prob + log_prob_j
 
         return total_log_prob
 
-    def model(self, X: torch.Tensor):
+    def model(
+        self,
+        X: torch.Tensor,
+        batch_indices: torch.Tensor | None = None,
+        total_size: int | None = None,
+    ):
         """
         Pyro model definition for ZINB graphical model.
 
@@ -249,9 +254,18 @@ class ZINBPseudoLikelihoodGraphicalModel(PyroModule):
             π (pi_zero) ~ Beta(1, 1): Zero-inflation probabilities
 
         Args:
-            X: Count matrix of shape (n_samples, n_features).
+            X: Count matrix. If using minibatching, this should be the batch slice
+               (shape: (batch_size, n_features)).
+            batch_indices: Optional indices for subsampling within the full dataset.
+                If provided, the model uses `pyro.plate("data", size=total_size, subsample=batch_indices)`
+                so Pyro can scale the log-probability correctly.
+            total_size: Total number of rows (cells/samples) in the full dataset.
+                Required when batch_indices is provided.
         """
         n_samples, n_features = X.shape
+
+        if batch_indices is not None and total_size is None:
+            raise ValueError("total_size must be provided when batch_indices is used for subsampling")
 
         # Use tighter prior to prevent extreme initial interaction values
         # that could cause numerical overflow in exp(X @ Omega)
@@ -302,10 +316,18 @@ class ZINBPseudoLikelihoodGraphicalModel(PyroModule):
                 ),
             )
 
-        pseudo_ll = self._pseudo_log_likelihood(
-            X, Omega, mu, phi, pi_zero, gamma_mu, gamma_phi, gamma_pi
-        )
-        pyro.factor("pseudo_likelihood", pseudo_ll)
+        if batch_indices is None:
+            with pyro.plate("data", n_samples):
+                pseudo_ll = self._pseudo_log_likelihood(
+                    X, Omega, mu, phi, pi_zero, gamma_mu, gamma_phi, gamma_pi
+                )
+                pyro.factor("pseudo_likelihood", pseudo_ll)
+        else:
+            with pyro.plate("data", size=total_size, subsample=batch_indices):
+                pseudo_ll = self._pseudo_log_likelihood(
+                    X, Omega, mu, phi, pi_zero, gamma_mu, gamma_phi, gamma_pi
+                )
+                pyro.factor("pseudo_likelihood", pseudo_ll)
 
     def get_omega(
         self, A_tril: torch.Tensor
