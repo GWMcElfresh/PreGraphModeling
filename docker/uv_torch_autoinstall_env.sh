@@ -4,6 +4,18 @@
 #
 # Intentionally avoids `set -e` / `set -u` to prevent changing caller semantics.
 
+# Under Apptainer/Singularity the container filesystem is often read-only.
+# We expect the HPC runner to create a writable venv on a bind mount and handle
+# CUDA torch installation there.
+if [ -n "${APPTAINER_NAME:-}" ] || [ -n "${SINGULARITY_NAME:-}" ] || [ -n "${APPTAINER_CONTAINER:-}" ]; then
+  return 0 2>/dev/null || exit 0
+fi
+
+# If a virtualenv is active, do not attempt system installs.
+if [ -n "${VIRTUAL_ENV:-}" ]; then
+  return 0 2>/dev/null || exit 0
+fi
+
 AUTO="${PREGRAPHMODELING_TORCH_AUTO:-1}"
 GPU_INDEX_URL="${PREGRAPHMODELING_TORCH_GPU_INDEX_URL:-https://download.pytorch.org/whl/cu121}"
 UV_INDEX_STRATEGY="${PREGRAPHMODELING_UV_INDEX_STRATEGY:-unsafe-best-match}"

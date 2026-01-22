@@ -24,6 +24,17 @@ GPU_INDEX_URL="${PREGRAPHMODELING_TORCH_GPU_INDEX_URL:-https://download.pytorch.
 UV_INDEX_STRATEGY="${PREGRAPHMODELING_UV_INDEX_STRATEGY:-unsafe-best-match}"
 GPU_PACKAGES="${PREGRAPHMODELING_TORCH_GPU_PACKAGES:-torch torchvision torchaudio}"
 
+# Under Apptainer/Singularity the container filesystem is often read-only.
+# Expect the HPC runner to create a writable venv and handle CUDA torch there.
+if [ -n "${APPTAINER_NAME:-}" ] || [ -n "${SINGULARITY_NAME:-}" ] || [ -n "${APPTAINER_CONTAINER:-}" ]; then
+  AUTO=0
+fi
+
+# If a virtualenv is active, do not attempt system installs.
+if [ -n "${VIRTUAL_ENV:-}" ]; then
+  AUTO=0
+fi
+
 has_nvidia_gpu() {
   # These checks are intentionally lightweight and do not require nvidia-smi.
   # When running with NVIDIA Container Toolkit, /dev/nvidia* devices are typically present.

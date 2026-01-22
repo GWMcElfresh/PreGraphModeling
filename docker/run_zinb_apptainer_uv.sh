@@ -18,13 +18,29 @@ set -euo pipefail
 # - A per-run venv in $PWD avoids writing into the image.
 #
 # Usage example (recommended):
-#   apptainer exec --nv -B "$PWD":/work <image.sif> bash docker/run_zinb_apptainer_uv.sh \
+#   apptainer exec --nv -B "$PWD":/work \
+#   <image.sif> \
+#   bash docker/run_zinb_apptainer_uv.sh \
 #     --counts /work/python/synthetic_counts.csv \
 #     --method mcmc --num-chains 16 --num-samples 1000 --warmup-steps 400 \
 #     --device cuda --batch-size 512
 
-VENV_DIR="${VENV_DIR:-.venv}"
 PROJECT_DIR="${PROJECT_DIR:-}"
+
+# For HPC use, default to a venv on the bind-mounted /work if present.
+# This keeps all writes off the container filesystem (often read-only).
+if [ -z "${VENV_DIR:-}" ] && [ -d "/work" ]; then
+  VENV_DIR="/work/.venv"
+fi
+VENV_DIR="${VENV_DIR:-.venv}"
+
+# Clean venv each run by default (avoids stale state between jobs).
+PREGRAPHMODELING_CLEAN_VENV="${PREGRAPHMODELING_CLEAN_VENV:-1}"
+
+# Put uv cache on /work by default to avoid writing into the image.
+if [ -z "${UV_CACHE_DIR:-}" ] && [ -d "/work" ]; then
+  export UV_CACHE_DIR="/work/.uv-cache"
+fi
 
 # If you set UV_PYTHON=3.12, uv will try to use that interpreter.
 # IMPORTANT: Dockerfile.python currently uses python:3.11-slim by default,
@@ -49,7 +65,7 @@ has_nvidia_gpu() {
 }
 
 torch_is_cpu_only() {
-  python - <<'PY' 2>/dev/null || echo cpu
+  "$VENV_DIR/bin/python" - <<'PY' 2>/dev/null || echo cpu
 try:
     import torch
     print('cuda' if getattr(torch.version, 'cuda', None) else 'cpu')
@@ -71,6 +87,7 @@ maybe_upgrade_torch_to_cuda() {
   log "[run_zinb] NVIDIA GPU detected; upgrading torch in venv from: $GPU_INDEX_URL"
   IFS=' ' read -r -a gpu_packages_array <<<"$GPU_PACKAGES"
   uv pip install \
+    --python "$VENV_DIR/bin/python" \
     --index-url "$GPU_INDEX_URL" \
     --extra-index-url "https://pypi.org/simple" \
     --index-strategy "$UV_INDEX_STRATEGY" \
@@ -81,6 +98,12 @@ maybe_upgrade_torch_to_cuda() {
 resolve_project_dir() {
   if [ -n "$PROJECT_DIR" ]; then
     echo "$PROJECT_DIR"
+    return 0
+  fi
+
+  # Common bind mount location used by the sbatch launcher
+  if [ -f "/work/python/fit_zinb_graphical_model.py" ]; then
+    echo "/work/python"
     return 0
   fi
 
@@ -104,6 +127,11 @@ ensure_uv_present() {
 }
 
 ensure_venv() {
+  if [ "$PREGRAPHMODELING_CLEAN_VENV" = "1" ] && [ -d "$VENV_DIR" ]; then
+    log "[run_zinb] Removing existing venv due to PREGRAPHMODELING_CLEAN_VENV=1: $VENV_DIR"
+    rm -rf "$VENV_DIR"
+  fi
+
   if [ -d "$VENV_DIR" ] && [ -x "$VENV_DIR/bin/python" ]; then
     return 0
   fi
@@ -122,6 +150,7 @@ ensure_venv() {
 install_deps_once() {
   local proj_dir="$1"
   local marker="$VENV_DIR/.pregraphmodeling_deps_installed"
+  local venv_python="$VENV_DIR/bin/python"
 
   if [ -f "$marker" ]; then
     return 0
@@ -132,12 +161,14 @@ install_deps_once() {
   fi
 
   log "[run_zinb] Installing requirements into venv from $proj_dir/requirements.txt"
-  uv pip install -r "$proj_dir/requirements.txt"
+  uv pip install --python "$venv_python" -r "$proj_dir/requirements.txt"
 
-  # Install the local package in editable mode if possible.
-  if [ -f "$proj_dir/pyproject.toml" ]; then
-    log "[run_zinb] Installing project editable ($proj_dir)"
-    uv pip install -e "$proj_dir" --no-deps
+  # Editable installs commonly try to write *.egg-info into the source tree.
+  # Under Apptainer the source may be read-only (e.g., /app), so we skip this by default.
+  # If you *really* need it, set PREGRAPHMODELING_INSTALL_PROJECT=1.
+  if [ "${PREGRAPHMODELING_INSTALL_PROJECT:-0}" = "1" ] && [ -f "$proj_dir/pyproject.toml" ]; then
+    log "[run_zinb] PREGRAPHMODELING_INSTALL_PROJECT=1; attempting editable install ($proj_dir)"
+    uv pip install --python "$venv_python" -e "$proj_dir" --no-deps
   fi
 
   touch "$marker"

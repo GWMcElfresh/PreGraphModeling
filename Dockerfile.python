@@ -95,7 +95,7 @@ WORKDIR /app
 # Entry point that upgrades torch to CUDA wheels on GPU machines.
 # Defaults to cu121 at runtime; override per host driver/GPU as needed.
 # (A100 often works with cu121 or cu118.)
-ENV PREGRAPHMODELING_TORCH_AUTO=1
+ENV PREGRAPHMODELING_TORCH_AUTO=0
 ENV PREGRAPHMODELING_TORCH_GPU_INDEX_URL=https://download.pytorch.org/whl/cu121
 ENV PREGRAPHMODELING_UV_INDEX_STRATEGY=unsafe-best-match
 ENV PREGRAPHMODELING_TORCH_GPU_PACKAGES="torch torchvision torchaudio"
