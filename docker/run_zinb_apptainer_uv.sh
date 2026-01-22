@@ -69,12 +69,13 @@ maybe_upgrade_torch_to_cuda() {
   fi
 
   log "[run_zinb] NVIDIA GPU detected; upgrading torch in venv from: $GPU_INDEX_URL"
+  IFS=' ' read -r -a gpu_packages_array <<<"$GPU_PACKAGES"
   uv pip install \
     --index-url "$GPU_INDEX_URL" \
     --extra-index-url "https://pypi.org/simple" \
     --index-strategy "$UV_INDEX_STRATEGY" \
     --upgrade \
-    $GPU_PACKAGES
+    "${gpu_packages_array[@]}"
 }
 
 resolve_project_dir() {
