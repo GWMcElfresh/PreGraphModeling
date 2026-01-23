@@ -42,6 +42,17 @@ if [ -z "${UV_CACHE_DIR:-}" ] && [ -d "/work" ]; then
   export UV_CACHE_DIR="/work/.uv-cache"
 fi
 
+ensure_writable_dir() {
+  local dir="$1"
+  local label="$2"
+
+  mkdir -p "$dir" 2>/dev/null || die "$label directory is not creatable: $dir"
+
+  local probe="$dir/.pregraphmodeling_write_test"
+  : >"$probe" 2>/dev/null || die "$label directory is not writable: $dir"
+  rm -f "$probe" 2>/dev/null || true
+}
+
 # If you set UV_PYTHON=3.12, uv will try to use that interpreter.
 # IMPORTANT: Dockerfile.python currently uses python:3.11-slim by default,
 # so python 3.12 may not be available inside the container unless you rebuild
@@ -178,10 +189,37 @@ main() {
   local proj_dir
   proj_dir="$(resolve_project_dir)"
 
+  # Default output directory: prefer bind-mounted /work when available.
+  # If the project is running from /app inside an Apptainer SIF, /app is usually read-only.
+  local default_out
+  default_out="${PREGRAPHMODELING_OUT_DIR:-}"
+  if [ -z "$default_out" ] && [ -d "/work" ]; then
+    default_out="/work/outputs_fit"
+  fi
+  default_out="${default_out:-./outputs_fit}"
+
+  # If user didn't specify --out, inject a safe default.
+  local -a run_args
+  run_args=("$@")
+  local has_out=0
+  for a in "${run_args[@]}"; do
+    if [ "$a" = "--out" ] || [[ "$a" == --out=* ]]; then
+      has_out=1
+      break
+    fi
+  done
+  if [ "$has_out" = "0" ]; then
+    run_args+=("--out" "$default_out")
+  fi
+
   ensure_venv
 
   # shellcheck disable=SC1090
   source "$VENV_DIR/bin/activate"
+
+# Fail fast if we don't have a writable location for venv/caches.
+ensure_writable_dir "$(dirname "$VENV_DIR")" "VENV"
+ensure_writable_dir "${UV_CACHE_DIR:-.uv-cache}" "UV_CACHE"
 
   # Re-install only once per venv
   install_deps_once "$proj_dir"
@@ -192,8 +230,8 @@ main() {
   # Run from the project directory so relative paths work naturally.
   cd "$proj_dir"
 
-  log "[run_zinb] Running: python fit_zinb_graphical_model.py $*"
-  "$VENV_DIR/bin/python" fit_zinb_graphical_model.py "$@"
+  log "[run_zinb] Running: python fit_zinb_graphical_model.py ${run_args[*]}"
+  "$VENV_DIR/bin/python" fit_zinb_graphical_model.py "${run_args[@]}"
 }
 
 main "$@"
