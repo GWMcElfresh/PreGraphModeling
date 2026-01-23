@@ -49,9 +49,9 @@ class TestLoadCountMatrix:
         with tempfile.TemporaryDirectory() as tmpdir:
             filepath = Path(tmpdir) / "counts.csv"
             with open(filepath, "w") as f:
-                f.write("col1,col2,col3\n")
-                f.write("1,2,3\n")
-                f.write("4,5,6\n")
+                f.write("\"\",col1,col2,col3\n")
+                f.write("\"row1\",1,2,3\n")
+                f.write("\"row2\",4,5,6\n")
 
             result = load_count_matrix(str(filepath), device="cpu")
 
