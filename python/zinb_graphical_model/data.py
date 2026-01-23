@@ -41,9 +41,11 @@ def load_count_matrix(filepath: str, device: str = "cuda") -> torch.Tensor:
         else:
             data = npz_data[keys[0]]
     elif suffix == ".csv":
-        data = np.loadtxt(filepath, delimiter=",", skiprows=1)
+        # Load CSV, skipping header row (skiprows=1) and first column (usecols) which contains row names
+        data = np.loadtxt(filepath, delimiter=",", skiprows=1, usecols=lambda i: i > 0)
     elif suffix in (".tsv", ".txt"):
-        data = np.loadtxt(filepath, delimiter="\t", skiprows=1)
+        # Load TSV, skipping header row (skiprows=1) and first column (usecols) which contains row names
+        data = np.loadtxt(filepath, delimiter="\t", skiprows=1, usecols=lambda i: i > 0)
     else:
         raise ValueError(f"Unsupported file format: {suffix}")
 
