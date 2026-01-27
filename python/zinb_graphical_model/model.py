@@ -180,8 +180,9 @@ class ZINBPseudoLikelihoodGraphicalModel(PyroModule):
             π_j^cond = σ(logit(π_j) + γ_π · effect_j)
             P(X_j | X_{-j}) = ZINB(X_j | μ_j^cond, φ_j^cond, π_j^cond)
 
-        This approximation is computationally tractable and provides consistent
-        parameter estimates for graphical models.
+        This vectorized implementation computes all feature effects in a single
+        matrix operation, avoiding a O(n_features) Python loop and dramatically
+        reducing memory allocations for GPU efficiency.
 
         Args:
             X: Count matrix of shape (n_samples, n_features).
@@ -197,40 +198,40 @@ class ZINBPseudoLikelihoodGraphicalModel(PyroModule):
         Returns:
             Pseudo-log-likelihood per sample (shape: (n_samples,)).
         """
-        n_samples, n_features = X.shape
-
-        total_log_prob = torch.zeros(n_samples, device=self.device)
-
-        for j in range(n_features):
-            mask = torch.ones(n_features, dtype=torch.bool, device=self.device)
-            mask[j] = False
-
-            X_minus_j = X[:, mask]
-            Omega_j_minus_j = Omega[j, mask]
-
-            # Compute the shared interaction effect
-            effect = X_minus_j @ Omega_j_minus_j
-            # Clamp the effect BEFORE scaling to prevent overflow
-            effect = torch.clamp(effect, min=-10.0, max=10.0)
-            
-            # Conditional μ: log-link (exp transform)
-            conditional_mu = mu[j] * torch.exp(gamma_mu * effect)
-            conditional_mu = torch.clamp(conditional_mu, min=1e-6, max=1e6)
-            
-            # Conditional φ: log-link (exp transform)
-            conditional_phi = phi[j] * torch.exp(gamma_phi * effect)
-            conditional_phi = torch.clamp(conditional_phi, min=1e-6, max=1e6)
-            
-            # Conditional π: logit-link (sigmoid transform)
-            # logit(pi) = log(pi / (1 - pi))
-            pi_j_safe = torch.clamp(pi_zero[j], min=1e-6, max=1.0 - 1e-6)
-            logit_pi = torch.log(pi_j_safe / (1 - pi_j_safe))
-            conditional_logit_pi = logit_pi + gamma_pi * effect
-            conditional_logit_pi = torch.clamp(conditional_logit_pi, min=-10.0, max=10.0)
-            conditional_pi = torch.sigmoid(conditional_logit_pi)
-
-            log_prob_j = self._zinb_log_prob(X[:, j], conditional_mu, conditional_phi, conditional_pi)
-            total_log_prob = total_log_prob + log_prob_j
+        # compute all effects in one matrix multiplication
+        # For pseudo-likelihood, effect_j = sum_{k != j} Omega[j,k] * X[:,k]
+        # This equals (X @ Omega^T)[j] - X[:,j] * Omega[j,j]
+        # Since Omega is symmetric with unit diagonal: effect_j = (X @ Omega)[:,j] - X[:,j]
+        
+        # Compute all effects at once: shape (n_samples, n_features)
+        # Omega_offdiag = Omega with diagonal zeroed out (log(0) = 1 that is)
+        Omega_offdiag = Omega - torch.diag(torch.diag(Omega))
+        effects = X @ Omega_offdiag  # (n_samples, n_features)
+        
+        # Clamp effects to prevent overflow in exp
+        effects = torch.clamp(effects, min=-10.0, max=10.0)
+        
+        # Conditional μ: log-link (exp transform) - vectorized over all features
+        # mu shape: (n_features,) -> broadcast to (n_samples, n_features)
+        conditional_mu = mu.unsqueeze(0) * torch.exp(gamma_mu * effects)
+        conditional_mu = torch.clamp(conditional_mu, min=1e-6, max=1e6)
+        
+        # Conditional φ: log-link (exp transform)
+        conditional_phi = phi.unsqueeze(0) * torch.exp(gamma_phi * effects)
+        conditional_phi = torch.clamp(conditional_phi, min=1e-6, max=1e6)
+        
+        # Conditional π: logit-link (sigmoid transform)
+        pi_safe = torch.clamp(pi_zero, min=1e-6, max=1.0 - 1e-6)
+        logit_pi = torch.log(pi_safe / (1 - pi_safe))  # shape: (n_features,)
+        conditional_logit_pi = logit_pi.unsqueeze(0) + gamma_pi * effects
+        conditional_logit_pi = torch.clamp(conditional_logit_pi, min=-10.0, max=10.0)
+        conditional_pi = torch.sigmoid(conditional_logit_pi)
+        
+        # Compute ZINB log prob for all features at once
+        log_probs = self._zinb_log_prob(X, conditional_mu, conditional_phi, conditional_pi)
+        
+        # Sum over features to get per-sample pseudo-log-likelihood
+        total_log_prob = log_probs.sum(dim=1)
 
         return total_log_prob
 
