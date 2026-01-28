@@ -32,6 +32,13 @@ from pyro.nn import PyroModule
 from . import _check_gpu_availability
 
 
+# =============================================================================
+# ZINB PSEUDO-LIKELIHOOD GRAPHICAL MODEL
+# =============================================================================
+# The core model class that defines the probabilistic graphical model for
+# zero-inflated negative binomial count data with pairwise feature interactions.
+# =============================================================================
+
 class ZINBPseudoLikelihoodGraphicalModel(PyroModule):
     """
     Zero-Inflated Negative Binomial (ZINB) Graphical Model with Pseudo-Likelihood Inference.
@@ -72,6 +79,15 @@ class ZINBPseudoLikelihoodGraphicalModel(PyroModule):
         self.device = torch.device(available_device)
         self.n_interaction_params = (n_features * (n_features - 1)) // 2
 
+    # -------------------------------------------------------------------------
+    # Ω (Omega) Matrix Construction:
+    # -------------------------------------------------------------------------
+    # The interaction matrix Ω is symmetric with unit diagonal. It is constructed
+    # from an unconstrained lower-triangular vector A_tril via direct mapping:
+    #   Ω_ij = A_ij for i ≠ j
+    #   Ω_ii = 1 (identifiability constraint)
+    # -------------------------------------------------------------------------
+
     def _build_omega(self, A_tril: torch.Tensor) -> torch.Tensor:
         """
         Build symmetric interaction matrix Ω from unconstrained A.
@@ -102,6 +118,20 @@ class ZINBPseudoLikelihoodGraphicalModel(PyroModule):
 
         return Omega
 
+    # -------------------------------------------------------------------------
+    # ZINB Log-Probability:
+    # -------------------------------------------------------------------------
+    # The Zero-Inflated Negative Binomial distribution models count data with
+    # excess zeros by mixing a point mass at zero with a negative binomial:
+    #
+    #   ZINB(x | μ, φ, π) = π · I(x=0) + (1-π) · NB(x | μ, φ)
+    #
+    # Parameters:
+    #   μ (mu): Mean of the NB component. Must be positive.
+    #   φ (phi): Dispersion (also called 'r' or 'size'). As φ → ∞, NB → Poisson.
+    #   π (pi): Zero-inflation probability ∈ [0, 1].
+    # -------------------------------------------------------------------------
+
     def _zinb_log_prob(
         self,
         x: torch.Tensor,
@@ -130,7 +160,11 @@ class ZINBPseudoLikelihoodGraphicalModel(PyroModule):
         Returns:
             Log probability log P(x | μ, φ, π) under ZINB.
         """
-        # Ensure numerical stability with clamping
+        # ---------------------------------------------------------------------
+        # Numerical Stability:
+        # ---------------------------------------------------------------------
+        # Clamp parameters to avoid log(0), division by zero, and overflow.
+        # ---------------------------------------------------------------------
         mu_safe = torch.clamp(mu, min=1e-6, max=1e6)
         phi_safe = torch.clamp(phi, min=1e-6, max=1e6)
         
@@ -150,6 +184,12 @@ class ZINBPseudoLikelihoodGraphicalModel(PyroModule):
         log_pi = torch.log(pi_safe)
         log_one_minus_pi = torch.log(1 - pi_safe)
 
+        # ---------------------------------------------------------------------
+        # ZINB Mixture Log-Probability:
+        # ---------------------------------------------------------------------
+        # For x = 0: log(π + (1-π)·NB(0)) = logaddexp(log(π), log(1-π) + log(NB(0)))
+        # For x > 0: log((1-π)·NB(x)) = log(1-π) + log(NB(x))
+        # ---------------------------------------------------------------------
         log_prob = torch.where(
             x == 0,
             torch.logaddexp(log_pi, log_one_minus_pi + nb_log_prob),
@@ -157,6 +197,23 @@ class ZINBPseudoLikelihoodGraphicalModel(PyroModule):
         )
 
         return log_prob
+
+    # -------------------------------------------------------------------------
+    # Pseudo-Likelihood Computation:
+    # -------------------------------------------------------------------------
+    # The pseudo-likelihood avoids intractable partition functions by conditioning
+    # each feature on all others. For feature j:
+    #
+    #   effect_j = Σ_{k≠j} Ω_{jk} · X_k  (neighbor interaction effect)
+    #
+    #   μ_j^cond = μ_j · exp(γ_μ · effect_j)    (log-link for mean)
+    #   φ_j^cond = φ_j · exp(γ_φ · effect_j)    (log-link for dispersion)
+    #   π_j^cond = σ(logit(π_j) + γ_π · effect_j)  (logit-link for zero-inflation)
+    #
+    #   P(X_j | X_{-j}) = ZINB(X_j | μ_j^cond, φ_j^cond, π_j^cond)
+    #
+    # The full pseudo-log-likelihood is the sum over all samples and features.
+    # -------------------------------------------------------------------------
 
     def _pseudo_log_likelihood(
         self,
@@ -198,18 +255,27 @@ class ZINBPseudoLikelihoodGraphicalModel(PyroModule):
         Returns:
             Pseudo-log-likelihood per sample (shape: (n_samples,)).
         """
-        # compute all effects in one matrix multiplication
+        # ---------------------------------------------------------------------
+        # Vectorized Effect Computation:
+        # ---------------------------------------------------------------------
         # For pseudo-likelihood, effect_j = sum_{k != j} Omega[j,k] * X[:,k]
         # This equals (X @ Omega^T)[j] - X[:,j] * Omega[j,j]
         # Since Omega is symmetric with unit diagonal: effect_j = (X @ Omega)[:,j] - X[:,j]
-        
-        # Compute all effects at once: shape (n_samples, n_features)
-        # Omega_offdiag = Omega with diagonal zeroed out (log(0) = 1 that is)
+        # We zero out the diagonal of Omega to compute all effects at once.
+        # ---------------------------------------------------------------------
         Omega_offdiag = Omega - torch.diag(torch.diag(Omega))
         effects = X @ Omega_offdiag  # (n_samples, n_features)
         
         # Clamp effects to prevent overflow in exp
         effects = torch.clamp(effects, min=-10.0, max=10.0)
+        
+        # ---------------------------------------------------------------------
+        # Conditional Parameter Computation:
+        # ---------------------------------------------------------------------
+        # Apply link functions to compute conditional parameters.
+        # μ and φ use log-link (exp transform).
+        # π uses logit-link (sigmoid transform).
+        # ---------------------------------------------------------------------
         
         # Conditional μ: log-link (exp transform) - vectorized over all features
         # mu shape: (n_features,) -> broadcast to (n_samples, n_features)
@@ -227,13 +293,27 @@ class ZINBPseudoLikelihoodGraphicalModel(PyroModule):
         conditional_logit_pi = torch.clamp(conditional_logit_pi, min=-10.0, max=10.0)
         conditional_pi = torch.sigmoid(conditional_logit_pi)
         
-        # Compute ZINB log prob for all features at once
+        # ---------------------------------------------------------------------
+        # ZINB Log-Probability Aggregation:
+        # ---------------------------------------------------------------------
+        # Compute ZINB log prob for all features at once, then sum over features
+        # to get the per-sample pseudo-log-likelihood.
+        # ---------------------------------------------------------------------
         log_probs = self._zinb_log_prob(X, conditional_mu, conditional_phi, conditional_pi)
         
         # Sum over features to get per-sample pseudo-log-likelihood
         total_log_prob = log_probs.sum(dim=1)
 
         return total_log_prob
+
+    # -------------------------------------------------------------------------
+    # Pyro Model Definition:
+    # -------------------------------------------------------------------------
+    # Defines the probabilistic model for Pyro inference. Specifies:
+    #   1. Priors over all latent variables (A, γ, μ, φ, π)
+    #   2. Likelihood via pseudo-likelihood factor
+    #   3. Minibatching support via pyro.plate for SVI
+    # -------------------------------------------------------------------------
 
     def model(
         self,
@@ -270,8 +350,12 @@ class ZINBPseudoLikelihoodGraphicalModel(PyroModule):
         if batch_indices is not None and total_size is None:
             raise ValueError("total_size must be provided when batch_indices is used for subsampling")
 
+        # ---------------------------------------------------------------------
+        # Prior: Interaction Parameters A ~ Normal(0, 0.1)
+        # ---------------------------------------------------------------------
         # Use tighter prior to prevent extreme initial interaction values
         # that could cause numerical overflow in exp(X @ Omega)
+        # ---------------------------------------------------------------------
         A_tril = pyro.sample(
             "A_tril",
             dist.Normal(
@@ -281,25 +365,35 @@ class ZINBPseudoLikelihoodGraphicalModel(PyroModule):
 
         Omega = self._build_omega(A_tril)
 
-        # Gamma scaling factors for multi-parameter interactions
-        # gamma_mu centered at 1.0 (default behavior: interactions affect mu)
+        # ---------------------------------------------------------------------
+        # Prior: Gamma Scaling Factors
+        # ---------------------------------------------------------------------
+        # γ_μ centered at 1.0: default behavior is that interactions affect μ
+        # γ_φ centered at 0.0: default is no dispersion interactions
+        # γ_π centered at 0.0: default is no zero-inflation interactions
+        # ---------------------------------------------------------------------
         gamma_mu = pyro.sample(
             "gamma_mu",
             dist.Normal(torch.tensor(1.0, device=self.device), 0.5),
         )
         
-        # gamma_phi centered at 0.0 (default: no dispersion interactions)
         gamma_phi = pyro.sample(
             "gamma_phi",
             dist.Normal(torch.tensor(0.0, device=self.device), 0.5),
         )
         
-        # gamma_pi centered at 0.0 (default: no zero-inflation interactions)
         gamma_pi = pyro.sample(
             "gamma_pi",
             dist.Normal(torch.tensor(0.0, device=self.device), 0.5),
         )
 
+        # ---------------------------------------------------------------------
+        # Prior: Per-Feature ZINB Parameters
+        # ---------------------------------------------------------------------
+        # μ ~ LogNormal(0, 1): Positive mean parameters
+        # φ ~ LogNormal(0, 1): Positive dispersion parameters
+        # π ~ Beta(1, 1): Uniform prior on zero-inflation probabilities
+        # ---------------------------------------------------------------------
         with pyro.plate("features", n_features):
             mu = pyro.sample(
                 "mu",
@@ -319,6 +413,13 @@ class ZINBPseudoLikelihoodGraphicalModel(PyroModule):
                 ),
             )
 
+        # ---------------------------------------------------------------------
+        # Likelihood: Pseudo-Likelihood Factor
+        # ---------------------------------------------------------------------
+        # The data plate handles minibatching for SVI. The pseudo-likelihood
+        # is added as a factor (not an observed sample statement) because
+        # we're using the pseudo-likelihood approximation.
+        # ---------------------------------------------------------------------
         plate_kwargs = {"size": n_samples} if batch_indices is None else {"size": total_size, "subsample": batch_indices}
 
         with pyro.plate("data", **plate_kwargs):
@@ -326,6 +427,10 @@ class ZINBPseudoLikelihoodGraphicalModel(PyroModule):
                 X, Omega, mu, phi, pi_zero, gamma_mu, gamma_phi, gamma_pi
             )
             pyro.factor("pseudo_likelihood", pseudo_ll)
+
+    # -------------------------------------------------------------------------
+    # Public API: Omega Reconstruction
+    # -------------------------------------------------------------------------
 
     def get_omega(
         self, A_tril: torch.Tensor
