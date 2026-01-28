@@ -195,6 +195,48 @@ def _compute_omega_stats_dask(
     }
 
 
+def _materialize_omega_samples(
+    A_tril_samples: torch.Tensor,
+    model: ZINBPseudoLikelihoodGraphicalModel,
+    batch_size: int = 100,
+) -> torch.Tensor:
+    """
+    Materialize full Ω posterior samples from A_tril samples.
+    
+    Uses batched processing to improve efficiency while managing memory.
+    
+    Args:
+        A_tril_samples: Tensor of A_tril posterior samples (n_samples, n_params).
+        model: The graphical model instance.
+        batch_size: Number of samples to process in each batch.
+        
+    Returns:
+        omega_samples: Full Ω tensor (n_samples, n_features, n_features).
+    """
+    n_posterior_samples = A_tril_samples.shape[0]
+    n_features = model.n_features
+    
+    omega_samples = torch.zeros(
+        n_posterior_samples,
+        n_features,
+        n_features,
+        device=model.device,
+    )
+    
+    # Process in batches for better efficiency
+    for start_idx in range(0, n_posterior_samples, batch_size):
+        end_idx = min(start_idx + batch_size, n_posterior_samples)
+        batch = A_tril_samples[start_idx:end_idx]
+        
+        # Use the batched build function if batch size > 1
+        if batch.shape[0] > 1:
+            omega_samples[start_idx:end_idx] = _batched_build_omega(batch, n_features)
+        else:
+            omega_samples[start_idx] = model.get_omega(batch[0])
+    
+    return omega_samples
+
+
 # =============================================================================
 # MCMC INFERENCE (NUTS/HMC)
 # =============================================================================
@@ -212,6 +254,7 @@ def run_inference(
     target_accept_prob: float = 0.8,
     max_tree_depth: int = 10,
     jit_compile: bool = False,
+    return_omega_samples: bool = False,
 ) -> dict[str, Any]:
     """
     Run NUTS/HMC inference for the ZINB graphical model.
@@ -228,6 +271,8 @@ def run_inference(
         target_accept_prob: Target acceptance probability for NUTS.
         max_tree_depth: Maximum tree depth for NUTS trajectory.
         jit_compile: Whether to JIT compile the model (can speed up inference).
+        return_omega_samples: If True, materialize full Ω posterior samples (n_samples, p, p).
+            WARNING: Can consume tens of terabytes for large models. Use only for small models.
 
     Returns:
         Dictionary containing:
@@ -236,6 +281,7 @@ def run_inference(
                 - 'mu' (μ): Mean parameter samples per feature
                 - 'phi' (φ): Dispersion parameter samples per feature
                 - 'pi_zero' (π): Zero-inflation probability samples
+            - 'omega_samples': (Optional) Full Ω posterior samples, only if return_omega_samples=True.
             - 'summary': Summary statistics (mean, std, quantiles) for all parameters.
             - 'mcmc': The Pyro MCMC object for diagnostics.
     """
@@ -291,11 +337,24 @@ def run_inference(
 
     summary = compute_summary(samples, omega_stats=omega_stats)
 
-    return {
+    # -------------------------------------------------------------------------
+    # Optional Full Ω Samples:
+    # -------------------------------------------------------------------------
+    # If requested, materialize the full (n_samples, p, p) Ω tensor.
+    # WARNING: This can be extremely large (tens of TB for large models).
+    # -------------------------------------------------------------------------
+    result = {
         "samples": samples,
         "summary": summary,
         "mcmc": mcmc,
     }
+    
+    if return_omega_samples:
+        result["omega_samples"] = _materialize_omega_samples(
+            samples["A_tril"], model, batch_size=100
+        )
+
+    return result
 
 
 # =============================================================================
@@ -318,6 +377,7 @@ def run_svi_inference(
     clip_norm: float = 5.0,
     num_posterior_samples: int = 200,
     progress_every: int = 25,
+    return_omega_samples: bool = False,
 ) -> dict[str, Any]:
     """Run stochastic variational inference (SVI) with optional minibatching.
 
@@ -339,10 +399,13 @@ def run_svi_inference(
         clip_norm: Gradient clipping norm.
         num_posterior_samples: Number of posterior samples to draw from the variational posterior.
         progress_every: Print a progress line every N epochs (0 disables).
+        return_omega_samples: If True, materialize full Ω posterior samples (n_samples, p, p).
+            WARNING: Can consume tens of terabytes for large models. Use only for small models.
 
     Returns:
         Dict compatible with run_inference():
             - 'samples': posterior samples dict (approximate)
+            - 'omega_samples': (Optional) Full Ω posterior samples, only if return_omega_samples=True.
             - 'summary': summary statistics
             - 'losses': list of mean epoch losses
             - 'guide': fitted AutoNormal guide
@@ -441,12 +504,25 @@ def run_svi_inference(
 
     summary = compute_summary(stacked, omega_stats=omega_stats)
 
-    return {
+    # -------------------------------------------------------------------------
+    # Optional Full Ω Samples:
+    # -------------------------------------------------------------------------
+    # If requested, materialize the full (n_samples, p, p) Ω tensor.
+    # WARNING: This can be extremely large (tens of TB for large models).
+    # -------------------------------------------------------------------------
+    result = {
         "samples": stacked,
         "summary": summary,
         "losses": losses,
         "guide": guide,
     }
+    
+    if return_omega_samples:
+        result["omega_samples"] = _materialize_omega_samples(
+            stacked["A_tril"], model, batch_size=100
+        )
+
+    return result
 
 
 # =============================================================================

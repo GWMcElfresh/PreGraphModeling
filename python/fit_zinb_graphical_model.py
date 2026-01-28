@@ -239,6 +239,17 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--max-tree-depth", type=int, default=10)
     p.add_argument("--jit-compile", action="store_true")
 
+    # Memory/output options
+    p.add_argument(
+        "--supermassive-computer-destroying-samples-return",
+        action="store_true",
+        help=(
+            "Return full omega_samples tensor (n_samples, p, p). "
+            "WARNING: Can consume tens of terabytes for large models. "
+            "Use only for small models where you need the full posterior samples."
+        )
+    )
+
     p.add_argument("--out", default="./outputs_fit", help="Output directory")
     args = p.parse_args(argv)
 
@@ -263,6 +274,7 @@ def main(argv: list[str] | None = None) -> int:
             target_accept_prob=args.target_accept,
             max_tree_depth=args.max_tree_depth,
             jit_compile=args.jit_compile,
+            return_omega_samples=args.supermassive_computer_destroying_samples_return,
         )
     else:
         results = run_svi_inference(
@@ -272,6 +284,7 @@ def main(argv: list[str] | None = None) -> int:
             num_epochs=args.epochs,
             learning_rate=args.lr,
             num_posterior_samples=args.posterior_samples,
+            return_omega_samples=args.supermassive_computer_destroying_samples_return,
         )
 
     summary = results["summary"]
@@ -283,6 +296,16 @@ def main(argv: list[str] | None = None) -> int:
 
     # Save posterior samples for all parameters.
     _save_posterior_samples_npz(out_dir / "posterior_samples.npz", results["samples"])
+
+    # Save omega_samples separately if materialized (can be very large!)
+    if "omega_samples" in results:
+        print("\nWARNING: Saving materialized omega_samples to disk...")
+        omega_samples_array = _to_numpy(results["omega_samples"])
+        size_gb = omega_samples_array.nbytes / (1024 ** 3)
+        print(f"  Size: {size_gb:.2f} GB")
+        print(f"  Shape: {omega_samples_array.shape}")
+        np.savez_compressed(out_dir / "omega_samples.npz", omega_samples=omega_samples_array)
+        print(f"  Saved to: {out_dir / 'omega_samples.npz'}")
 
     # Save a full (but compact) summary JSON.
     summary_no_omega = {k: v for k, v in summary.items() if k != "omega"}
