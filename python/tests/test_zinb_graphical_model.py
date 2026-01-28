@@ -257,6 +257,7 @@ class TestInference:
             num_samples=10,
             warmup_steps=5,
             num_chains=1,
+            return_omega_samples=True,
         )
 
         assert "samples" in results
@@ -290,6 +291,7 @@ class TestInference:
             num_posterior_samples=10,
             progress_every=0,
             seed=42,
+            return_omega_samples=True,
         )
 
         assert "samples" in results
@@ -319,9 +321,12 @@ class TestInference:
         samples = {
             "mu": torch.randn(4, 3),
         }
-        omega_samples = torch.randn(4, 3, 3)
+        omega_stats = {
+            "mean": torch.randn(3, 3),
+            "std": torch.rand(3, 3),
+        }
 
-        summary = compute_summary(samples, omega_samples)
+        summary = compute_summary(samples, omega_stats=omega_stats)
 
         assert "mu" in summary
 
@@ -356,6 +361,7 @@ class TestIntegration:
                 num_samples=5,
                 warmup_steps=5,
                 num_chains=1,
+                return_omega_samples=True,
             )
 
             assert results["omega_samples"].shape[0] == 5

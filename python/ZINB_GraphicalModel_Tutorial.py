@@ -523,13 +523,18 @@ def main():
     # 6. Posterior Analysis
     # ============================================================
     samples = results["samples"]
-    omega_samples = results["omega_samples"]
     summary = results["summary"]
 
     print("\nPosterior samples available:")
     for key, val in samples.items():
         print(f"  - {key}: shape {tuple(val.shape)}")
-    print(f"  - omega_samples: shape {tuple(omega_samples.shape)}")
+    
+    # omega_samples is only present if requested via return_omega_samples=True
+    if "omega_samples" in results:
+        omega_samples = results["omega_samples"]
+        print(f"  - omega_samples: shape {tuple(omega_samples.shape)}")
+    else:
+        print("  - omega_samples: Not materialized (use return_omega_samples=True to get full tensor)")
 
     print("\n" + "=" * 60)
     print("POSTERIOR SUMMARY")

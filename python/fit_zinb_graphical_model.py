@@ -239,6 +239,17 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--max-tree-depth", type=int, default=10)
     p.add_argument("--jit-compile", action="store_true")
 
+    # Memory/output options
+    p.add_argument(
+        "--supermassive-computer-destroying-samples-return",
+        action="store_true",
+        help=(
+            "Return full omega_samples tensor (n_samples, p, p). "
+            "WARNING: Can consume tens of terabytes for large models. "
+            "Use only for small models where you need the full posterior samples."
+        )
+    )
+
     p.add_argument("--out", default="./outputs_fit", help="Output directory")
     args = p.parse_args(argv)
 
@@ -263,6 +274,7 @@ def main(argv: list[str] | None = None) -> int:
             target_accept_prob=args.target_accept,
             max_tree_depth=args.max_tree_depth,
             jit_compile=args.jit_compile,
+            return_omega_samples=args.supermassive_computer_destroying_samples_return,
         )
     else:
         results = run_svi_inference(
@@ -272,6 +284,7 @@ def main(argv: list[str] | None = None) -> int:
             num_epochs=args.epochs,
             learning_rate=args.lr,
             num_posterior_samples=args.posterior_samples,
+            return_omega_samples=args.supermassive_computer_destroying_samples_return,
         )
 
     summary = results["summary"]
