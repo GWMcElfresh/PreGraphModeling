@@ -58,6 +58,39 @@ class TestLoadCountMatrix:
             assert isinstance(result, torch.Tensor)
             assert result.shape == (2, 3)
 
+    def test_load_csv_header_no_rownames(self):
+        """CSV with header row and no row-name column should keep all features."""
+        from zinb_graphical_model.data import load_count_matrix
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            filepath = Path(tmpdir) / "counts_header_only.csv"
+            with open(filepath, "w") as f:
+                f.write("col1,col2,col3\n")
+                f.write("1,2,3\n")
+                f.write("4,5,6\n")
+
+            result = load_count_matrix(str(filepath), device="cpu")
+
+            assert isinstance(result, torch.Tensor)
+            assert result.shape == (2, 3)
+            assert torch.allclose(result, torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]))
+
+    def test_load_csv_no_header_no_rownames(self):
+        """CSV with no header and no row-name column should keep all features."""
+        from zinb_graphical_model.data import load_count_matrix
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            filepath = Path(tmpdir) / "counts_no_header.csv"
+            with open(filepath, "w") as f:
+                f.write("1,2,3\n")
+                f.write("4,5,6\n")
+
+            result = load_count_matrix(str(filepath), device="cpu")
+
+            assert isinstance(result, torch.Tensor)
+            assert result.shape == (2, 3)
+            assert torch.allclose(result, torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]))
+
     def test_file_not_found(self):
         """Test that FileNotFoundError is raised for missing file."""
         from zinb_graphical_model.data import load_count_matrix
