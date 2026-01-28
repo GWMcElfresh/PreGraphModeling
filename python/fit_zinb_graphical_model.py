@@ -297,6 +297,16 @@ def main(argv: list[str] | None = None) -> int:
     # Save posterior samples for all parameters.
     _save_posterior_samples_npz(out_dir / "posterior_samples.npz", results["samples"])
 
+    # Save omega_samples separately if materialized (can be very large!)
+    if "omega_samples" in results:
+        print("\nWARNING: Saving materialized omega_samples to disk...")
+        omega_samples_array = _to_numpy(results["omega_samples"])
+        size_gb = omega_samples_array.nbytes / (1024 ** 3)
+        print(f"  Size: {size_gb:.2f} GB")
+        print(f"  Shape: {omega_samples_array.shape}")
+        np.savez_compressed(out_dir / "omega_samples.npz", omega_samples=omega_samples_array)
+        print(f"  Saved to: {out_dir / 'omega_samples.npz'}")
+
     # Save a full (but compact) summary JSON.
     summary_no_omega = {k: v for k, v in summary.items() if k != "omega"}
     (out_dir / "posterior_summary.json").write_text(

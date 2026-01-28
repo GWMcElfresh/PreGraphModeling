@@ -195,6 +195,48 @@ def _compute_omega_stats_dask(
     }
 
 
+def _materialize_omega_samples(
+    A_tril_samples: torch.Tensor,
+    model: ZINBPseudoLikelihoodGraphicalModel,
+    batch_size: int = 100,
+) -> torch.Tensor:
+    """
+    Materialize full Ω posterior samples from A_tril samples.
+    
+    Uses batched processing to improve efficiency while managing memory.
+    
+    Args:
+        A_tril_samples: Tensor of A_tril posterior samples (n_samples, n_params).
+        model: The graphical model instance.
+        batch_size: Number of samples to process in each batch.
+        
+    Returns:
+        omega_samples: Full Ω tensor (n_samples, n_features, n_features).
+    """
+    n_posterior_samples = A_tril_samples.shape[0]
+    n_features = model.n_features
+    
+    omega_samples = torch.zeros(
+        n_posterior_samples,
+        n_features,
+        n_features,
+        device=model.device,
+    )
+    
+    # Process in batches for better efficiency
+    for start_idx in range(0, n_posterior_samples, batch_size):
+        end_idx = min(start_idx + batch_size, n_posterior_samples)
+        batch = A_tril_samples[start_idx:end_idx]
+        
+        # Use the batched build function if batch size > 1
+        if batch.shape[0] > 1:
+            omega_samples[start_idx:end_idx] = _batched_build_omega(batch, n_features)
+        else:
+            omega_samples[start_idx] = model.get_omega(batch[0])
+    
+    return omega_samples
+
+
 # =============================================================================
 # MCMC INFERENCE (NUTS/HMC)
 # =============================================================================
@@ -308,17 +350,9 @@ def run_inference(
     }
     
     if return_omega_samples:
-        A_tril_samples = samples["A_tril"]
-        n_posterior_samples = A_tril_samples.shape[0]
-        omega_samples = torch.zeros(
-            n_posterior_samples,
-            model.n_features,
-            model.n_features,
-            device=model.device,
+        result["omega_samples"] = _materialize_omega_samples(
+            samples["A_tril"], model, batch_size=100
         )
-        for i in range(n_posterior_samples):
-            omega_samples[i] = model.get_omega(A_tril_samples[i])
-        result["omega_samples"] = omega_samples
 
     return result
 
@@ -484,17 +518,9 @@ def run_svi_inference(
     }
     
     if return_omega_samples:
-        A_tril_samples = stacked["A_tril"]
-        n_samples_omega = A_tril_samples.shape[0]
-        omega_samples = torch.zeros(
-            n_samples_omega,
-            model.n_features,
-            model.n_features,
-            device=model.device,
+        result["omega_samples"] = _materialize_omega_samples(
+            stacked["A_tril"], model, batch_size=100
         )
-        for i in range(n_samples_omega):
-            omega_samples[i] = model.get_omega(A_tril_samples[i])
-        result["omega_samples"] = omega_samples
 
     return result
 
